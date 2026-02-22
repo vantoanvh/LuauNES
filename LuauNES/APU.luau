@@ -30,6 +30,7 @@ function APU.new(sound_asset_ids: SoundAssetIds, dmc_reader: DmcReader?): APUIns
 	local apu_frame_irq = false
 	local apu_dmc_irq = false
 	
+	-- narrow luau bridge optimization
 	local newindex = select(2, xpcall(function() game.___ = {} end, function() return debug.info(2, "f") end))
 
 	local CPU_CLOCK_HZ = 1789773
