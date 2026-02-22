@@ -7,6 +7,7 @@ local SOUND_ASSET_IDS = {
 	pulse_25 = "rbxassetid://108267815293395",
 	pulse_50 = "rbxassetid://74193770330344",
 	pulse_75 = "rbxassetid://100273244108902",
+	
 	triangle = "rbxassetid://135072236414372",
 	noise = "rbxassetid://77447526849899",
 }
@@ -221,39 +222,37 @@ end
 local function bind_mapper(mapper_value: Mapper?)
 	mapper = mapper_value
 
-	mapper_map_prg_addr = nil
-	mapper_map_chr_addr = nil
-	mapper_write_cpu = nil
-	mapper_read_cpu = nil
-	mapper_read_nametable = nil
-	mapper_write_nametable = nil
-	mapper_map_prg_ram_addr = nil
-	mapper_clock_scanline = nil
-	mapper_clock_a12 = nil
-	mapper_on_ppu_address = nil
-	mapper_irq_pending = nil
-	mapper_get_mirroring = nil
-	mapper_prg_ram_readable = nil
-	mapper_prg_ram_writable = nil
-
-	if mapper_value == nil then
-		return
+	if mapper then
+		mapper_map_prg_addr = mapper.mapPrgAddr
+		mapper_map_chr_addr = mapper.mapChrAddr
+		mapper_write_cpu = mapper.write
+		mapper_read_cpu = mapper.readCpu
+		mapper_read_nametable = mapper.readNametable
+		mapper_write_nametable = mapper.writeNametable
+		mapper_map_prg_ram_addr = mapper.mapPrgRamAddr
+		mapper_clock_scanline = mapper.clockScanline
+		mapper_clock_a12 = mapper.clockA12
+		mapper_on_ppu_address = mapper.onPpuAddress
+		mapper_irq_pending = mapper.irqPending
+		mapper_get_mirroring = mapper.getMirroring
+		mapper_prg_ram_readable = mapper.prgRamReadable
+		mapper_prg_ram_writable = mapper.prgRamWritable
+	else
+		mapper_map_prg_addr = nil
+		mapper_map_chr_addr = nil
+		mapper_write_cpu = nil
+		mapper_read_cpu = nil
+		mapper_read_nametable = nil
+		mapper_write_nametable = nil
+		mapper_map_prg_ram_addr = nil
+		mapper_clock_scanline = nil
+		mapper_clock_a12 = nil
+		mapper_on_ppu_address = nil
+		mapper_irq_pending = nil
+		mapper_get_mirroring = nil
+		mapper_prg_ram_readable = nil
+		mapper_prg_ram_writable = nil
 	end
-
-	mapper_map_prg_addr = mapper_value.mapPrgAddr
-	mapper_map_chr_addr = mapper_value.mapChrAddr
-	mapper_write_cpu = mapper_value.write
-	mapper_read_cpu = mapper_value.readCpu
-	mapper_read_nametable = mapper_value.readNametable
-	mapper_write_nametable = mapper_value.writeNametable
-	mapper_map_prg_ram_addr = mapper_value.mapPrgRamAddr
-	mapper_clock_scanline = mapper_value.clockScanline
-	mapper_clock_a12 = mapper_value.clockA12
-	mapper_on_ppu_address = mapper_value.onPpuAddress
-	mapper_irq_pending = mapper_value.irqPending
-	mapper_get_mirroring = mapper_value.getMirroring
-	mapper_prg_ram_readable = mapper_value.prgRamReadable
-	mapper_prg_ram_writable = mapper_value.prgRamWritable
 end
 
 local function prg_read(addr: number): number
@@ -346,12 +345,6 @@ local function read_palette(addr: number)
 	return buffer.readu8(palette, normalize_palette_addr(addr))
 end
 
-local function write_palette(addr: number, value: number)
-	local index = normalize_palette_addr(addr)
-	buffer.writeu8(palette, index, value)
-	sync_palette_cache(index)
-end
-
 for i = 0, PALETTE_SIZE - 1 do
 	sync_palette_cache(i)
 end
@@ -419,7 +412,9 @@ local function ppu_write(addr: number, value: number, fetch_kind: number?)
 		return
 	end
 
-	write_palette(addr, value)
+	local index = normalize_palette_addr(addr)
+	buffer.writeu8(palette, index, value)
+	sync_palette_cache(index)
 end
 
 local function reset_bg_pipeline()
@@ -1329,12 +1324,6 @@ local function read16_wrap(addr)
 	return bit32.bor(lo, bit32.lshift(hi, 8))
 end
 
-local function get_dma_cycles()
-	local c = dma_cycles
-	dma_cycles = 0
-	return c
-end
-
 local function set_flag(flag, cond)
 	if cond then
 		status = bit32.bor(status, flag)
@@ -1364,7 +1353,7 @@ local opcodes do
 	function imp() end
 	function acc() end
 
-	function calc_indexed_addr(base: number, index: number): (number, number, boolean)
+	local function calc_indexed_addr(base: number, index: number): (number, number, boolean)
 		local low_sum = bit32.band(base, 0xFF) + index
 		local final_addr = bit32.band(base + index, 0xFFFF)
 		local dummy_addr = bit32.bor(
@@ -2047,40 +2036,47 @@ local opcodes do
 	end
 end
 
-local indexed_dummy_always = buffer.create(256)
-local page_cross_penalty = buffer.create(256)
+local indexed_dummy_always = buffer.create(256) do
+	local list = {
+		0x91, 0x99, 0x9D,
+		0x93, 0x9B, 0x9C,
+		0x9E, 0x9F,
+		0x1E, 0x3E, 0x5E,
+		0x7E, 0xDE, 0xFE,
+		0x13, 0x1B, 0x1F,
+		0x33, 0x3B, 0x3F,
+		0x53, 0x5B, 0x5F,
+		0x73, 0x7B, 0x7F,
+		0xD3, 0xDB, 0xDF,
+		0xF3, 0xFB, 0xFF
+	}
+	
+	for _, opcode in list do
+		buffer.writeu8(indexed_dummy_always, opcode, 1)
+	end
+end
+
+local page_cross_penalty = buffer.create(256) do
+	local list = {
+		0x11, 0x19, 0x1D,
+		0x31, 0x39, 0x3D,
+		0x51, 0x59, 0x5D,
+		0x71, 0x79, 0x7D,
+		0xB1, 0xB9, 0xBD,
+		0xB3, 0xBF, 0xBB,
+		0xBE, 0xBC,
+		0x1C, 0x3C, 0x5C,
+		0x7C, 0xDC, 0xFC,
+		0xD1, 0xD9, 0xDD,
+		0xF1, 0xF9, 0xFD
+	}
+	
+	for _, opcode in list do
+		buffer.writeu8(page_cross_penalty, opcode, 1)
+	end
+end
+
 local opcode_execute = table.create(256)
-
-for _, opcode in {
-	0x11, 0x19, 0x1D,
-	0x31, 0x39, 0x3D,
-	0x51, 0x59, 0x5D,
-	0x71, 0x79, 0x7D,
-	0xB1, 0xB9, 0xBD,
-	0xB3, 0xBF, 0xBB,
-	0xBE, 0xBC,
-	0x1C, 0x3C, 0x5C,
-	0x7C, 0xDC, 0xFC,
-	0xD1, 0xD9, 0xDD,
-	0xF1, 0xF9, 0xFD
-	} do
-
-	buffer.writeu8(page_cross_penalty, opcode, 1)
-end
-
-for _, opcode in {
-	0x91, 0x99, 0x9D,
-	0x93, 0x9B, 0x9C, 0x9E, 0x9F,
-	0x1E, 0x3E, 0x5E, 0x7E, 0xDE, 0xFE,
-	0x13, 0x1B, 0x1F,
-	0x33, 0x3B, 0x3F,
-	0x53, 0x5B, 0x5F,
-	0x73, 0x7B, 0x7F,
-	0xD3, 0xDB, 0xDF,
-	0xF3, 0xFB, 0xFF
-	} do
-	buffer.writeu8(indexed_dummy_always, opcode, 1)
-end
 
 for opcode = 0, 255 do
 	local op = opcodes[opcode]
@@ -2255,7 +2251,7 @@ local function irq(): number
 	return 7
 end
 
-function step()
+local function step()
 	begin_cpu_event()
 	if cpu_jammed then
 		cycles = 2
@@ -2266,35 +2262,13 @@ function step()
 	local opcode = bus_read(pc)
 	pc = bit32.band(pc + 1, 0xFFFF)
 	opcode_execute[opcode]()
-
-	local dma = get_dma_cycles()
-	cycles += dma
+	
+	cycles += dma_cycles
+	dma_cycles = 0
+	
 	finalize_cpu_event(cycles)
 
 	return cycles
-end
-
-local function render(): buffer?
-	while not frame_ready do
-		if cpu_jammed then
-			step()
-		elseif nmi_pending_flag then
-			begin_cpu_event()
-			local nmi_cycles = nmi()
-			finalize_cpu_event(nmi_cycles)
-			nmi_pending_flag = false
-		elseif (apu_irq_pending() or mapper_irq_pending and mapper_irq_pending()) and not bit32.btest(status, 4) then
-			begin_cpu_event()
-			local irq_cycles = irq()
-			finalize_cpu_event(irq_cycles)
-		else
-			step()
-		end
-	end
-	
-	local ready = frame_ready
-	frame_ready = false
-	return if ready then framebuffer else nil
 end
 
 local function load(data: string)
@@ -2480,31 +2454,50 @@ local function load(data: string)
 	pc = read16(0xFFFC)
 end
 
-local function press(button: number, player: number?)
-	local port = if player ~= 2 then 0 else 1
-	local current = buffer.readu8(pad_state, port)
-
-	current = bit32.bor(current, button)
-
-	buffer.writeu8(pad_state, port, current)
-end
-
-local function release(button: number, player: number?)
-	local port = if player ~= 2 then 0 else 1
-	local current = buffer.readu8(pad_state, port)
-
-	current = bit32.band(current, bit32.bnot(button))
-
-	buffer.writeu8(pad_state, port, current)
-end
-
 return {
 	load = load,
 	reset = reset,
-	render = render,
+	
+	render = function(): buffer?
+		while not frame_ready do
+			if cpu_jammed then
+				step()
+			elseif nmi_pending_flag then
+				begin_cpu_event()
+				local nmi_cycles = nmi()
+				finalize_cpu_event(nmi_cycles)
+				nmi_pending_flag = false
+			elseif (apu_irq_pending() or mapper_irq_pending and mapper_irq_pending()) and not bit32.btest(status, 4) then
+				begin_cpu_event()
+				local irq_cycles = irq()
+				finalize_cpu_event(irq_cycles)
+			else
+				step()
+			end
+		end
 
-	press = press,
-	release = release,
+		local ready = frame_ready
+		frame_ready = false
+		return if ready then framebuffer else nil
+	end,
+
+	press = function(button: number, player: number?)
+		local port = if player ~= 2 then 0 else 1
+		local current = buffer.readu8(pad_state, port)
+
+		current = bit32.bor(current, button)
+
+		buffer.writeu8(pad_state, port, current)
+	end,
+	
+	release = function(button: number, player: number?)
+		local port = if player ~= 2 then 0 else 1
+		local current = buffer.readu8(pad_state, port)
+
+		current = bit32.band(current, bit32.bnot(button))
+
+		buffer.writeu8(pad_state, port, current)
+	end,
 	
 	setAudioParent = apu.setAudioParent,
 	setAudioEnabled = apu.setAudioEnabled,
