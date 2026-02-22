@@ -1248,6 +1248,73 @@ local function MMC5(config: MapperConfig): Mapper
 	}
 end
 
+--// MAPPER_007
+local function AOROM(config: MapperConfig): Mapper
+	local prg_banks_32k = atLeastOne(config.prgSize // 0x8000)
+	local four_screen = config.fourScreen
+	local bank_select = 0
+	local mirroring = if four_screen then Mirroring.VERTICAL else Mirroring.ONE_SCREEN_LOW
+
+	local function map_prg_addr(addr: number): number
+		addr = bit32.band(addr, 0xFFFF)
+		if addr < 0x8000 then
+			return 0
+		end
+
+		return bank_select * 0x8000 + bit32.band(addr - 0x8000, 0x7FFF)
+	end
+
+	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+		return bit32.band(addr, 0x1FFF)
+	end
+
+	local function write_cpu(addr: number, value: number)
+		addr = bit32.band(addr, 0xFFFF)
+		if addr < 0x8000 then
+			return
+		end
+
+		value = bit32.band(value, 0xFF)
+		bank_select = wrapBank(bit32.band(value, 0x07), prg_banks_32k)
+
+		if not four_screen then
+			mirroring = if bit32.btest(value, 0x10) then Mirroring.ONE_SCREEN_HIGH else Mirroring.ONE_SCREEN_LOW
+		end
+	end
+
+	local function reset_mapper()
+		bank_select = 0
+		mirroring = if four_screen then Mirroring.VERTICAL else Mirroring.ONE_SCREEN_LOW
+	end
+
+	return {
+		mapPrgAddr = map_prg_addr,
+		mapChrAddr = map_chr_addr,
+		write = write_cpu,
+		readCpu = nil,
+		readNametable = nil,
+		writeNametable = nil,
+		mapPrgRamAddr = nil,
+		clockA12 = nil,
+		clockScanline = nil,
+		onPpuAddress = nil,
+		reset = reset_mapper,
+		irqPending = function(): boolean
+			return false
+		end,
+		clearIrq = function() end,
+		getMirroring = function(): number
+			return mirroring
+		end,
+		prgRamReadable = function(): boolean
+			return false
+		end,
+		prgRamWritable = function(): boolean
+			return false
+		end,
+	}
+end
+
 --// MAPPER_009
 local function MMC2(config: MapperConfig): Mapper
 	local prg_total_8k = atLeastOne(config.prgSize // 0x2000)
@@ -1534,73 +1601,6 @@ local function ColorDreams(config: MapperConfig): Mapper
 	end
 
 	reset_mapper()
-
-	return {
-		mapPrgAddr = map_prg_addr,
-		mapChrAddr = map_chr_addr,
-		write = write_cpu,
-		readCpu = nil,
-		readNametable = nil,
-		writeNametable = nil,
-		mapPrgRamAddr = nil,
-		clockA12 = nil,
-		clockScanline = nil,
-		onPpuAddress = nil,
-		reset = reset_mapper,
-		irqPending = function(): boolean
-			return false
-		end,
-		clearIrq = function() end,
-		getMirroring = function(): number
-			return mirroring
-		end,
-		prgRamReadable = function(): boolean
-			return false
-		end,
-		prgRamWritable = function(): boolean
-			return false
-		end,
-	}
-end
-
---// MAPPER_007
-local function AOROM(config: MapperConfig): Mapper
-	local prg_banks_32k = atLeastOne(config.prgSize // 0x8000)
-	local four_screen = config.fourScreen
-	local bank_select = 0
-	local mirroring = if four_screen then Mirroring.VERTICAL else Mirroring.ONE_SCREEN_LOW
-
-	local function map_prg_addr(addr: number): number
-		addr = bit32.band(addr, 0xFFFF)
-		if addr < 0x8000 then
-			return 0
-		end
-
-		return bank_select * 0x8000 + bit32.band(addr - 0x8000, 0x7FFF)
-	end
-
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
-		return bit32.band(addr, 0x1FFF)
-	end
-
-	local function write_cpu(addr: number, value: number)
-		addr = bit32.band(addr, 0xFFFF)
-		if addr < 0x8000 then
-			return
-		end
-
-		value = bit32.band(value, 0xFF)
-		bank_select = wrapBank(bit32.band(value, 0x07), prg_banks_32k)
-
-		if not four_screen then
-			mirroring = if bit32.btest(value, 0x10) then Mirroring.ONE_SCREEN_HIGH else Mirroring.ONE_SCREEN_LOW
-		end
-	end
-
-	local function reset_mapper()
-		bank_select = 0
-		mirroring = if four_screen then Mirroring.VERTICAL else Mirroring.ONE_SCREEN_LOW
-	end
 
 	return {
 		mapPrgAddr = map_prg_addr,
