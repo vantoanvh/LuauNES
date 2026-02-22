@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>File to RBXMX</title>
+  <style>
+    :root {
+      --bg-a: #0b0f16;
+      --bg-b: #101827;
+      --panel: rgba(24, 30, 43, 0.86);
+      --surface: rgba(12, 17, 27, 0.78);
+      --text: #eef2fa;
+      --muted: #a6afc2;
+      --border: rgba(255, 255, 255, 0.1);
+      --accent: #83b9ff;
+      --accent-strong: #9cc8ff;
+      --shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(1000px 600px at 15% 0%, #1a2438 0%, transparent 55%),
+        linear-gradient(160deg, var(--bg-a) 0%, var(--bg-b) 100%);
+      color: var(--text);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      padding: 16px;
+      color-scheme: dark;
+    }
+
+    .card {
+      width: min(780px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    .title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
+    .subtitle {
+      margin: 4px 0 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    input[type="file"] {
+      max-width: 100%;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px;
+      background: var(--surface);
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      padding: 7px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+    }
+
+    button.primary {
+      background: rgba(131, 185, 255, 0.2);
+      border-color: rgba(131, 185, 255, 0.45);
+      color: var(--accent-strong);
+    }
+
+    button:hover {
+      border-color: rgba(255, 255, 255, 0.22);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    button.primary:hover {
+      border-color: rgba(156, 200, 255, 0.72);
+      background: rgba(131, 185, 255, 0.28);
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 280px;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      font: 13px/1.45 Consolas, "Courier New", monospace;
+      color: var(--text);
+      background: var(--surface);
+      outline: none;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    input[type="file"]:focus-visible,
+    button:focus-visible,
+    textarea:focus-visible {
+      border-color: rgba(131, 185, 255, 0.8);
+      box-shadow: 0 0 0 3px rgba(131, 185, 255, 0.16);
+    }
+
+    .hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1 class="title">File to RBXMX</h1>
+    <p class="subtitle">Upload, edit source, and export.</p>
+
+    <div class="row">
+      <input id="fileInput" type="file" />
+      <button id="copyBtn" type="button">Copy</button>
+      <button id="exportBtn" class="primary" type="button">Export .rbxmx</button>
+    </div>
+
+    <textarea id="clipboardBox" spellcheck="false" placeholder="--// name.extension&#10;&#10;return \"\\0\\1\\23...\""></textarea>
+    <p class="hint">Upload a file to generate editable text. Export uses this box exactly inside Source CDATA.</p>
+  </main>
+
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const clipboardBox = document.getElementById("clipboardBox");
+    const copyBtn = document.getElementById("copyBtn");
+    const exportBtn = document.getElementById("exportBtn");
+    const MAX_FILE_BYTES = 10 * 1024 * 1024;
+    const SHORT_ESCAPE_BY_BYTE = {
+      7: "a",
+      8: "b",
+      9: "t",
+      10: "n",
+      11: "v",
+      12: "f",
+      13: "r"
+    };
+
+    function bytesToLuaEscapedString(bytes) {
+      const parts = [];
+      let previousWasNumericEscape = false;
+
+      for (const b of bytes) {
+        if (b === 34 || b === 92) {
+          parts.push("\\" + String.fromCharCode(b));
+          previousWasNumericEscape = false;
+          continue;
+        }
+
+        const shortEscape = SHORT_ESCAPE_BY_BYTE[b];
+        if (shortEscape) {
+          parts.push("\\" + shortEscape);
+          previousWasNumericEscape = false;
+          continue;
+        }
+
+        const isPrintableAscii = b >= 32 && b <= 126;
+        const isAsciiDigit = b >= 48 && b <= 57;
+        if (isPrintableAscii && !(previousWasNumericEscape && isAsciiDigit)) {
+          parts.push(String.fromCharCode(b));
+          previousWasNumericEscape = false;
+          continue;
+        }
+
+        parts.push("\\" + String(b));
+        previousWasNumericEscape = true;
+      }
+
+      return parts.join("");
+    }
+
+    function toClipboardText(fileName, bytes) {
+      const escaped = bytesToLuaEscapedString(bytes);
+      return `--// ${fileName}\n\nreturn "${escaped}"`;
+    }
+
+    function cdataSafe(text) {
+      // Split any CDATA close token so generated XML stays valid.
+      return text.replaceAll("]]>", "]]]]><![CDATA[>");
+    }
+
+    function buildRbxmx(sourceText) {
+      const safeSource = cdataSafe(sourceText);
+      return `<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">\n\t<Item class="ModuleScript">\n\t\t<Properties>\n\t\t\t<Content name="LinkedSource"><null></null></Content>\n\t\t\t<ProtectedString name="Source"><![CDATA[${safeSource}]]></ProtectedString>\n\t\t\t<string name="Name">ModuleScript</string>\n\t\t</Properties>\n\t</Item>\n</roblox>`;
+    }
+
+    function downloadTextFile(fileName, content) {
+      const blob = new Blob([content], { type: "application/xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    fileInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      if (file.size > MAX_FILE_BYTES) {
+        alert("Max file size is 10 MB.");
+        fileInput.value = "";
+        return;
+      }
+
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      clipboardBox.value = toClipboardText(file.name, bytes);
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(clipboardBox.value);
+        copyBtn.textContent = "Copied";
+        setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+      } catch {
+        copyBtn.textContent = "Copy failed";
+        setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+      }
+    });
+
+    exportBtn.addEventListener("click", () => {
+      const source = clipboardBox.value ?? "";
+      const xml = buildRbxmx(source);
+      downloadTextFile("module.rbxmx", xml);
+    });
+  </script>
+</body>
+</html>
