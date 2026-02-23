@@ -3,6 +3,9 @@
 This is very performant and able to run **Kirby Adventure** with 70-90 FPS ( 13th Gen Intel(R) Core(TM) i7-13620H )
 Supports 2 player mode, sounds, and more.
 
+Moreover, you should upload your audio files as your own ( I cannot distrub the sounds because I am unverified )<br>
+The audio files you can download in the [Sounds](https://github.com/vantoanvh/LuauNES/tree/main/Sounds) folder
+
 > <h3>Disclamer</h3> Your device should have native code generation to make this run effectively.<br>This used <strong>EditableImage</strong> so you need ID Verification for this.
 
 This emulator currently supports:
@@ -20,6 +23,8 @@ This emulator currently supports:
 - `Mapper 66` **GxROM**
 
 ## Code usage
+
+You can download the **ROMs** in the internet and convert it into **rbxmx** using [my website](https://vantoanvh.github.io/LuauNES/)!
 
 ```luau
 local UserInputService = game:GetService'UserInputService'
