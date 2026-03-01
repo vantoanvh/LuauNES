@@ -2,8 +2,10 @@
 **NES** emulator ported to roblox luau inspired/based on **[LuaNES](https://github.com/nico-abram/LuaNES)** by the original creator **[nico-abram](https://github.com/nico-abram)**<br><br>
 This is very performant and able to run **Kirby Adventure** with 90 - 110 FPS ( 13th Gen Intel(R) Core(TM) i7-13620H )
 also **Donkey Kong Classics** with 160-180 FPS.
+<br><br>
+But for low/mid-end devices, it gonna explodes. ( 15 FPS )
 <br>
-Supports 2 player mode, sounds, and more.
+Supports 2 player mode, sounds, PPU dot-based and, cycle-counted CPU.
 
 Moreover, you should upload your audio files as your own ( I cannot distrub the sounds because I am unverified )<br>
 The audio files you can download in the [Sounds](https://github.com/vantoanvh/LuauNES/tree/main/Sounds) folder<br>
@@ -27,6 +29,7 @@ This emulator currently supports:
 ## Code usage
 
 You can download the **ROMs** in the internet and convert it into **rbxmx** using [my website](https://vantoanvh.github.io/LuauNES/)!
+or testing pregenerated roms in [test](https://github.com/vantoanvh/LuauNES/tree/main/test)
 
 ```luau
 --!native
