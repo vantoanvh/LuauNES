@@ -1,6 +1,6 @@
 # LuauNES
 **NES** emulator ported to roblox luau inspired/based on **[LuaNES](https://github.com/nico-abram/LuaNES)** by the original creator **[nico-abram](https://github.com/nico-abram)**<br><br>
-This is very performant and able to run **Kirby Adventure** with 90 - 110 FPS ( 13th Gen Intel(R) Core(TM) i7-13620H )
+This is very performant and able to run **Kirby Adventure** with 90 - 110 FPS ( 13th Gen Intel® Core™ i7-13620H )<br>
 also **Donkey Kong Classics** with 160-180 FPS.
 <br><br>
 But for low/mid-end devices, it gonna explodes. ( 15 FPS )
@@ -24,7 +24,12 @@ This emulator currently supports:
 - `Mapper 9` **MMC2**
 - `Mapper 10` **MMC4**
 - `Mapper 11` **Color Dreams**
+- `Mapper 30` UNROM512,
 - `Mapper 66` **GxROM**
+- `Mapper 69` = **FME7** *(untested)*
+- `Mapper 71` = **Camerica** *(untested)*
+- `Mapper 79` = **NINA03_06** *(untested)*
+- `Mapper 206` = **DxROM** *(untested)*
 
 ## Code usage
 
@@ -49,8 +54,10 @@ Display.ImageContent = Content.fromObject(Screen)
 
 local WritePixels = Screen.WritePixelsBuffer
 
+-- Load the ROM!
 LuauNES.load(require'@game/ReplicatedStorage/Roms/KongClassic')
 
+-- Key mapping for player 1
 local keyMapP1 = {
 	[Enum.KeyCode.X] = LuauNES.Buttons.A,
 	[Enum.KeyCode.Z] = LuauNES.Buttons.B,
@@ -64,6 +71,7 @@ local keyMapP1 = {
 	[Enum.KeyCode.Right] = LuauNES.Buttons.Right,
 }
 
+-- Key mapping for player 2
 local keyMapP2 = {
 	[Enum.KeyCode.Q] = LuauNES.Buttons.A,
 	[Enum.KeyCode.E] = LuauNES.Buttons.B,
@@ -77,6 +85,7 @@ local keyMapP2 = {
 	[Enum.KeyCode.D] = LuauNES.Buttons.Right,
 }
 
+-- Fixed emulation
 local FIXED_DELTA_TIME = 1 / 60
 local accumulator = 0
 
