@@ -5,16 +5,16 @@
 local CRC32_POLY = 0xEDB88320
 local U32_MOD = 4294967296
 
-local CRC32_TABLE = buffer.create(256)
+local CRC32_TABLE = buffer.create(256 * 4)
 
 for i = 0, 255 do
 	local c = i
-	
+
 	for _ = 1, 8 do
 		c = if bit32.btest(c, 1) then bit32.bxor(bit32.rshift(c, 1), CRC32_POLY) else bit32.rshift(c, 1)
 	end
-	
-	buffer.writeu8(CRC32_TABLE, i, c)
+
+	buffer.writeu32(CRC32_TABLE, i * 4, c)
 end
 
 local MMC5_WRAM_UNITS_BY_CRC: {[number]: number} = {
@@ -48,22 +48,22 @@ local MMC5_WRAM_UNITS_BY_CRC: {[number]: number} = {
 
 return function(buf: buffer, start: number, len: number): number
 	local crc = 0xFFFFFFFF
-	
+
 	if len <= 0 then
 		local empty_crc = bit32.bnot(crc)
 		local empty_u32 = empty_crc % U32_MOD
-		
+
 		if empty_u32 < 0 then
 			empty_u32 += U32_MOD
 		end
-		
+
 		return MMC5_WRAM_UNITS_BY_CRC[empty_u32]
 	end
 
 	for i = 0, len - 1 do
 		local b = buffer.readu8(buf, start + i)
 		local idx = bit32.band(bit32.bxor(crc, b), 0xFF)
-		crc = bit32.bxor(bit32.rshift(crc, 8), buffer.readu8(CRC32_TABLE, idx))
+		crc = bit32.bxor(bit32.rshift(crc, 8), buffer.readu32(CRC32_TABLE, idx * 4))
 	end
 
 	local final_crc = bit32.bnot(crc)
@@ -71,6 +71,6 @@ return function(buf: buffer, start: number, len: number): number
 	if final_u32 < 0 then
 		final_u32 += U32_MOD
 	end
-	
+
 	return MMC5_WRAM_UNITS_BY_CRC[final_u32]
 end
