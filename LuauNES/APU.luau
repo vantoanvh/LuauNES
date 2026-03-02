@@ -37,13 +37,6 @@ return function (dmc_reader: DmcReader): APUInstance
 	local _, newindex = xpcall(function() game._____ = {} end, function() return debug.info(2, "f") end)
 
 	local CPU_CLOCK_HZ = 1789773
-	local APU_FRAME_4_LENGTH = 29830
-	local APU_FRAME_5_LENGTH = 37282
-	local APU_FRAME_Q1 = 7457
-	local APU_FRAME_Q2 = 14913
-	local APU_FRAME_Q3 = 22371
-	local APU_FRAME_Q4_4STEP = 29829
-	local APU_FRAME_Q4_5STEP = 37281
 
 	local LENGTH_TABLE = {
 		10, 254, 20, 2, 40, 4, 80, 6,
@@ -63,29 +56,32 @@ return function (dmc_reader: DmcReader): APUInstance
 		190, 160, 142, 128, 106, 85, 72, 54
 	}
 
-	local PULSE_GAIN_TRIM = 1.00
-	local TRIANGLE_GAIN_TRIM = 1.00
-	local NOISE_GAIN_TRIM = 1.00
-	local DMC_GAIN_TRIM = 1.00
-	local MMC5_PULSE_GAIN_TRIM = 0.22
-	local DMC_MIX_REFRESH_CYCLES = 1
-
 	local SOURCE_BASE_FREQUENCY_HZ = 441 -- must match manifest actual_base_frequency_hz
 	local PULSE_SPEED_NUM = CPU_CLOCK_HZ / (16 * SOURCE_BASE_FREQUENCY_HZ)
 	local TRIANGLE_SPEED_NUM = CPU_CLOCK_HZ / (32 * SOURCE_BASE_FREQUENCY_HZ)
 
 	local channel_enabled_mask = 0
 
-	local pulse_control = { 0, 0 }
-	local pulse_sweep = { 0, 0 }
-	local pulse_timer_low = { 0, 0 }
-	local pulse_timer = { 0, 0 }
-	local pulse_length = { 0, 0 }
-	local pulse_envelope_start = { false, false }
-	local pulse_envelope_divider = { 0, 0 }
-	local pulse_envelope_decay = { 0, 0 }
-	local pulse_sweep_divider = { 0, 0 }
-	local pulse_sweep_reload = { false, false }
+	local pulse1_control = 0
+	local pulse2_control = 0
+	local pulse1_sweep = 0
+	local pulse2_sweep = 0
+	local pulse1_timer_low = 0
+	local pulse2_timer_low = 0
+	local pulse1_timer = 0
+	local pulse2_timer = 0
+	local pulse1_length = 0
+	local pulse2_length = 0
+	local pulse1_envelope_start = false
+	local pulse2_envelope_start = false
+	local pulse1_envelope_divider = 0
+	local pulse2_envelope_divider = 0
+	local pulse1_envelope_decay = 0
+	local pulse2_envelope_decay = 0
+	local pulse1_sweep_divider = 0
+	local pulse2_sweep_divider = 0
+	local pulse1_sweep_reload = false
+	local pulse2_sweep_reload = false
 
 	local triangle_control = 0
 	local triangle_timer_low = 0
@@ -120,9 +116,12 @@ return function (dmc_reader: DmcReader): APUInstance
 	local dmc_dma_stall_cycles = 0
 
 	local mmc5_enabled = false
-	local mmc5_pulse_control = { 0, 0 }
-	local mmc5_pulse_timer_low = { 0, 0 }
-	local mmc5_pulse_timer = { 0, 0 }
+	local mmc5_pulse1_control = 0
+	local mmc5_pulse2_control = 0
+	local mmc5_pulse1_timer_low = 0
+	local mmc5_pulse2_timer_low = 0
+	local mmc5_pulse1_timer = 0
+	local mmc5_pulse2_timer = 0
 	local mmc5_pulse_running = 0
 	local mmc5_pulse_enable = 0
 	local mmc5_pcm_control = 0
@@ -137,8 +136,6 @@ return function (dmc_reader: DmcReader): APUInstance
 	local dmc_mix_counter = 0
 
 	local MASTER_SAMPLE_RATE = 44100
-	local MASTER_REGION_SOURCE_SECONDS = 4.0
-	local MASTER_OUTPUT_GAIN = 1.00
 	local REGION_GUARD_SAMPLES = 2048
 	local NOISE_PERIOD_TABLE = {
 		4, 8, 16, 32, 64, 96, 128, 160,
@@ -154,34 +151,17 @@ return function (dmc_reader: DmcReader): APUInstance
 		"pulse_75",
 	}
 
-	local function round_to_nearest(value: number): number
-		return math.floor(value + 0.5)
-	end
-
 	local function round_div_nearest(numerator: number, denominator: number): number
-		return math.floor(((numerator * 2) + denominator) / (denominator * 2))
+		return ((numerator * 2) + denominator) // (denominator * 2)
 	end
 
 	local function samples_to_seconds(sample_count: number): number
 		return sample_count / MASTER_SAMPLE_RATE
 	end
 
-	local function build_packed_regions(sample_counts: {number}): {NumberRange}
-		local cursor = 0
-		local regions = table.create(#sample_counts) :: {NumberRange}
-		for i, sample_count in sample_counts do
-			local start_sample = cursor
-			cursor += sample_count
-			local region = NumberRange.new(samples_to_seconds(start_sample), samples_to_seconds(cursor))
-			cursor += REGION_GUARD_SAMPLES
-			regions[i] = region
-		end
-		return regions
-	end
-
 	local function build_noise_region_banks(): ({NumberRange}, {NumberRange})
 		local cursor = 0
-		local min_region_samples = math.max(1, round_to_nearest(NOISE_MIN_REGION_SECONDS * MASTER_SAMPLE_RATE))
+		local min_region_samples = math.max(1, math.round(NOISE_MIN_REGION_SECONDS * MASTER_SAMPLE_RATE))
 
 		local function allocate_region(sample_count: number): NumberRange
 			local start_sample = cursor
@@ -210,17 +190,7 @@ return function (dmc_reader: DmcReader): APUInstance
 		return long_regions, short_regions
 	end
 
-	local function build_dmc_regions(): {NumberRange}
-		local source_region_samples = math.max(1, round_to_nearest(MASTER_REGION_SOURCE_SECONDS * MASTER_SAMPLE_RATE))
-		local sample_counts = table.create(#DMC_PERIOD_TABLE) :: {number}
-		for i = 1, #DMC_PERIOD_TABLE do
-			sample_counts[i] = source_region_samples
-		end
-		return build_packed_regions(sample_counts)
-	end
-
 	local NOISE_LONG_REGIONS, NOISE_SHORT_REGIONS = build_noise_region_banks()
-	local DMC_REGIONS = build_dmc_regions()
 
 	local function create_looped_sound(name: string, asset_key: string, region: NumberRange?): Sound
 		local sound = Instance.new("Sound")
@@ -257,6 +227,22 @@ return function (dmc_reader: DmcReader): APUInstance
 			bank[duty] = create_looped_sound(prefix .. "_" .. duty, PULSE_ASSET_KEYS[duty], nil)
 		end
 	end
+	local pulse1_duty1_sound = pulse_sound_bank[1][1]
+	local pulse1_duty2_sound = pulse_sound_bank[1][2]
+	local pulse1_duty3_sound = pulse_sound_bank[1][3]
+	local pulse1_duty4_sound = pulse_sound_bank[1][4]
+	local pulse2_duty1_sound = pulse_sound_bank[2][1]
+	local pulse2_duty2_sound = pulse_sound_bank[2][2]
+	local pulse2_duty3_sound = pulse_sound_bank[2][3]
+	local pulse2_duty4_sound = pulse_sound_bank[2][4]
+	local mmc5_pulse1_duty1_sound = mmc5_pulse_sound_bank[1][1]
+	local mmc5_pulse1_duty2_sound = mmc5_pulse_sound_bank[1][2]
+	local mmc5_pulse1_duty3_sound = mmc5_pulse_sound_bank[1][3]
+	local mmc5_pulse1_duty4_sound = mmc5_pulse_sound_bank[1][4]
+	local mmc5_pulse2_duty1_sound = mmc5_pulse_sound_bank[2][1]
+	local mmc5_pulse2_duty2_sound = mmc5_pulse_sound_bank[2][2]
+	local mmc5_pulse2_duty3_sound = mmc5_pulse_sound_bank[2][3]
+	local mmc5_pulse2_duty4_sound = mmc5_pulse_sound_bank[2][4]
 
 	local triangle_sound = create_looped_sound("Triangle", "triangle", nil)
 
@@ -270,6 +256,22 @@ return function (dmc_reader: DmcReader): APUInstance
 
 	local noise_long_sound_bank = create_region_bank("NoiseLong", "noise_mix", NOISE_LONG_REGIONS)
 	local noise_short_sound_bank = create_region_bank("NoiseShort", "noise_mix", NOISE_SHORT_REGIONS)
+	local sound_volume_cache = {}
+	local sound_speed_cache = {}
+
+	local function set_sound_volume(sound: Sound, value: number)
+		if sound_volume_cache[sound] ~= value then
+			sound_volume_cache[sound] = value
+			newindex(sound, "Volume", value)
+		end
+	end
+
+	local function set_sound_speed(sound: Sound, value: number)
+		if sound_speed_cache[sound] ~= value then
+			sound_speed_cache[sound] = value
+			newindex(sound, "PlaybackSpeed", value)
+		end
+	end
 
 	local function dmc_restart_sample()
 		dmc_current_addr = bit32.bor(0xC000, bit32.lshift(dmc_sample_addr_reg, 6))
@@ -334,27 +336,50 @@ return function (dmc_reader: DmcReader): APUInstance
 		return dmc_output_level ~= level_before or dmc_silence ~= silence_before
 	end
 
-	local function pulse_muted(index: number): boolean
-		if not bit32.btest(channel_enabled_mask, bit32.lshift(1, index - 1)) then
+	local function pulse1_muted(): boolean
+		if not bit32.btest(channel_enabled_mask, 0x01) then
+			return true
+		end
+		if pulse1_length <= 0 then
+			return true
+		end
+		if pulse1_timer < 8 or pulse1_timer > 0x7FF then
 			return true
 		end
 
-		if pulse_length[index] <= 0 then
-			return true
-		end
-
-		if pulse_timer[index] < 8 or pulse_timer[index] > 0x7FF then
-			return true
-		end
-
-		local sweep = pulse_sweep[index]
+		local sweep = pulse1_sweep
 		local shift = bit32.band(sweep, 0x07)
 		if bit32.btest(sweep, 0x80) and shift > 0 then
-			local timer = pulse_timer[index]
-			local delta = bit32.rshift(timer, shift)
+			local delta = bit32.rshift(pulse1_timer, shift)
 			local target = if bit32.btest(sweep, 0x08)
-				then timer - delta - (if index == 1 then 1 else 0)
-				else timer + delta
+				then pulse1_timer - delta - 1
+				else pulse1_timer + delta
+			if target > 0x7FF then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	local function pulse2_muted(): boolean
+		if not bit32.btest(channel_enabled_mask, 0x02) then
+			return true
+		end
+		if pulse2_length <= 0 then
+			return true
+		end
+		if pulse2_timer < 8 or pulse2_timer > 0x7FF then
+			return true
+		end
+
+		local sweep = pulse2_sweep
+		local shift = bit32.band(sweep, 0x07)
+		if bit32.btest(sweep, 0x80) and shift > 0 then
+			local delta = bit32.rshift(pulse2_timer, shift)
+			local target = if bit32.btest(sweep, 0x08)
+				then pulse2_timer - delta
+				else pulse2_timer + delta
 			if target > 0x7FF then
 				return true
 			end
@@ -368,16 +393,18 @@ return function (dmc_reader: DmcReader): APUInstance
 		dmc_mix_pending = false
 		dmc_mix_counter = 0
 
+		local tri_sound = triangle_sound
+
 		local pulse1_raw = 0
-		if not pulse_muted(1) then
-			local control = pulse_control[1]
-			pulse1_raw = if bit32.btest(control, 0x10) then bit32.band(control, 0x0F) else pulse_envelope_decay[1]
+		if not pulse1_muted() then
+			local control = pulse1_control
+			pulse1_raw = if bit32.btest(control, 0x10) then bit32.band(control, 0x0F) else pulse1_envelope_decay
 		end
 
 		local pulse2_raw = 0
-		if not pulse_muted(2) then
-			local control = pulse_control[2]
-			pulse2_raw = if bit32.btest(control, 0x10) then bit32.band(control, 0x0F) else pulse_envelope_decay[2]
+		if not pulse2_muted() then
+			local control = pulse2_control
+			pulse2_raw = if bit32.btest(control, 0x10) then bit32.band(control, 0x0F) else pulse2_envelope_decay
 		end
 
 		local triangle_raw = 0
@@ -394,11 +421,11 @@ return function (dmc_reader: DmcReader): APUInstance
 		local mmc5_pulse1_raw = 0
 		local mmc5_pulse2_raw = 0
 
-		if mmc5_enabled and bit32.btest(mmc5_pulse_enable, 0x01) and bit32.btest(mmc5_pulse_running, 0x01) and mmc5_pulse_timer[1] >= 8 then
-			mmc5_pulse1_raw = bit32.band(mmc5_pulse_control[1], 0x0F)
+		if mmc5_enabled and bit32.btest(mmc5_pulse_enable, 0x01) and bit32.btest(mmc5_pulse_running, 0x01) and mmc5_pulse1_timer >= 8 then
+			mmc5_pulse1_raw = bit32.band(mmc5_pulse1_control, 0x0F)
 		end
-		if mmc5_enabled and bit32.btest(mmc5_pulse_enable, 0x02) and bit32.btest(mmc5_pulse_running, 0x02) and mmc5_pulse_timer[2] >= 8 then
-			mmc5_pulse2_raw = bit32.band(mmc5_pulse_control[2], 0x0F)
+		if mmc5_enabled and bit32.btest(mmc5_pulse_enable, 0x02) and bit32.btest(mmc5_pulse_running, 0x02) and mmc5_pulse2_timer >= 8 then
+			mmc5_pulse2_raw = bit32.band(mmc5_pulse2_control, 0x0F)
 		end
 
 		local pulse_total = pulse1_raw + pulse2_raw
@@ -409,15 +436,13 @@ return function (dmc_reader: DmcReader): APUInstance
 			pulse1_gain = pulse_mix * (pulse1_raw / pulse_total)
 			pulse2_gain = pulse_mix * (pulse2_raw / pulse_total)
 		end
-		pulse1_gain *= PULSE_GAIN_TRIM
-		pulse2_gain *= PULSE_GAIN_TRIM
 
 		local mmc5_pulse_total = mmc5_pulse1_raw + mmc5_pulse2_raw
 		local mmc5_pulse1_gain = 0
 		local mmc5_pulse2_gain = 0
 
 		if mmc5_pulse_total > 0 then
-			local mmc5_gain = MMC5_PULSE_GAIN_TRIM * (mmc5_pulse_total / 30)
+			local mmc5_gain = 0.22 * (mmc5_pulse_total / 30)
 			mmc5_pulse1_gain = mmc5_gain * (mmc5_pulse1_raw / mmc5_pulse_total)
 			mmc5_pulse2_gain = mmc5_gain * (mmc5_pulse2_raw / mmc5_pulse_total)
 		end
@@ -439,69 +464,106 @@ return function (dmc_reader: DmcReader): APUInstance
 			dmc_gain = tnd_mix * (dmc_term / tnd_total)
 		end
 
-		triangle_gain *= TRIANGLE_GAIN_TRIM
-		noise_gain *= NOISE_GAIN_TRIM
-		dmc_gain *= DMC_GAIN_TRIM
-
 		if dmc_bytes_remaining <= 0 and dmc_buffer_empty and dmc_silence then
 			dmc_gain = 0
 		end
 
-		pulse1_gain *= MASTER_OUTPUT_GAIN
-		pulse2_gain *= MASTER_OUTPUT_GAIN
-		mmc5_pulse1_gain *= MASTER_OUTPUT_GAIN
-		mmc5_pulse2_gain *= MASTER_OUTPUT_GAIN
-		triangle_gain *= MASTER_OUTPUT_GAIN
-		noise_gain *= MASTER_OUTPUT_GAIN * 6.7
-		dmc_gain *= MASTER_OUTPUT_GAIN * 0.5
+		noise_gain *= 6.7
+		dmc_gain *= 0.5
 
-		for channel = 1, 2 do
-			local bank = pulse_sound_bank[channel]
-			local raw_level = if channel == 1 then pulse1_raw else pulse2_raw
-			if raw_level <= 0 then
-				for i = 1, #bank do
-					newindex(bank[i], "Volume", 0)
-				end
-			else
-				local duty = bit32.band(bit32.rshift(pulse_control[channel], 6), 0x03) + 1
-				local speed = PULSE_SPEED_NUM / (pulse_timer[channel] + 1)
-				local gain = if channel == 1 then pulse1_gain else pulse2_gain
-
-				for i = 1, #bank do
-					local sound = bank[i]
-					local target_volume = if i == duty then gain else 0
-					newindex(sound, "PlaybackSpeed", speed)
-					newindex(sound, "Volume", target_volume)
-				end
-			end
+		if pulse1_raw <= 0 then
+			set_sound_volume(pulse1_duty1_sound, 0)
+			set_sound_volume(pulse1_duty2_sound, 0)
+			set_sound_volume(pulse1_duty3_sound, 0)
+			set_sound_volume(pulse1_duty4_sound, 0)
+		else
+			local duty = bit32.band(bit32.rshift(pulse1_control, 6), 0x03) + 1
+			local speed = PULSE_SPEED_NUM / (pulse1_timer + 1)
+			local v1 = if duty == 1 then pulse1_gain else 0
+			local v2 = if duty == 2 then pulse1_gain else 0
+			local v3 = if duty == 3 then pulse1_gain else 0
+			local v4 = if duty == 4 then pulse1_gain else 0
+			set_sound_speed(pulse1_duty1_sound, speed)
+			set_sound_speed(pulse1_duty2_sound, speed)
+			set_sound_speed(pulse1_duty3_sound, speed)
+			set_sound_speed(pulse1_duty4_sound, speed)
+			set_sound_volume(pulse1_duty1_sound, v1)
+			set_sound_volume(pulse1_duty2_sound, v2)
+			set_sound_volume(pulse1_duty3_sound, v3)
+			set_sound_volume(pulse1_duty4_sound, v4)
 		end
 
-		for channel = 1, 2 do
-			local bank = mmc5_pulse_sound_bank[channel]
-			local raw_level = if channel == 1 then mmc5_pulse1_raw else mmc5_pulse2_raw
-			if raw_level <= 0 then
-				for i = 1, #bank do
-					newindex(bank[i], "Volume", 0)
-				end
-			else
-				local duty = bit32.band(bit32.rshift(mmc5_pulse_control[channel], 6), 0x03) + 1
-				local speed = PULSE_SPEED_NUM / (mmc5_pulse_timer[channel] + 1)
-				local gain = if channel == 1 then mmc5_pulse1_gain else mmc5_pulse2_gain
+		if pulse2_raw <= 0 then
+			set_sound_volume(pulse2_duty1_sound, 0)
+			set_sound_volume(pulse2_duty2_sound, 0)
+			set_sound_volume(pulse2_duty3_sound, 0)
+			set_sound_volume(pulse2_duty4_sound, 0)
+		else
+			local duty = bit32.band(bit32.rshift(pulse2_control, 6), 0x03) + 1
+			local speed = PULSE_SPEED_NUM / (pulse2_timer + 1)
+			local v1 = if duty == 1 then pulse2_gain else 0
+			local v2 = if duty == 2 then pulse2_gain else 0
+			local v3 = if duty == 3 then pulse2_gain else 0
+			local v4 = if duty == 4 then pulse2_gain else 0
+			set_sound_speed(pulse2_duty1_sound, speed)
+			set_sound_speed(pulse2_duty2_sound, speed)
+			set_sound_speed(pulse2_duty3_sound, speed)
+			set_sound_speed(pulse2_duty4_sound, speed)
+			set_sound_volume(pulse2_duty1_sound, v1)
+			set_sound_volume(pulse2_duty2_sound, v2)
+			set_sound_volume(pulse2_duty3_sound, v3)
+			set_sound_volume(pulse2_duty4_sound, v4)
+		end
 
-				for i = 1, #bank do
-					local sound = bank[i]
-					local target_volume = if i == duty then gain else 0
-					newindex(sound, "PlaybackSpeed", speed)
-					newindex(sound, "Volume", target_volume)
-				end
-			end
+		if mmc5_pulse1_raw <= 0 then
+			set_sound_volume(mmc5_pulse1_duty1_sound, 0)
+			set_sound_volume(mmc5_pulse1_duty2_sound, 0)
+			set_sound_volume(mmc5_pulse1_duty3_sound, 0)
+			set_sound_volume(mmc5_pulse1_duty4_sound, 0)
+		else
+			local duty = bit32.band(bit32.rshift(mmc5_pulse1_control, 6), 0x03) + 1
+			local speed = PULSE_SPEED_NUM / (mmc5_pulse1_timer + 1)
+			local v1 = if duty == 1 then mmc5_pulse1_gain else 0
+			local v2 = if duty == 2 then mmc5_pulse1_gain else 0
+			local v3 = if duty == 3 then mmc5_pulse1_gain else 0
+			local v4 = if duty == 4 then mmc5_pulse1_gain else 0
+			set_sound_speed(mmc5_pulse1_duty1_sound, speed)
+			set_sound_speed(mmc5_pulse1_duty2_sound, speed)
+			set_sound_speed(mmc5_pulse1_duty3_sound, speed)
+			set_sound_speed(mmc5_pulse1_duty4_sound, speed)
+			set_sound_volume(mmc5_pulse1_duty1_sound, v1)
+			set_sound_volume(mmc5_pulse1_duty2_sound, v2)
+			set_sound_volume(mmc5_pulse1_duty3_sound, v3)
+			set_sound_volume(mmc5_pulse1_duty4_sound, v4)
+		end
+
+		if mmc5_pulse2_raw <= 0 then
+			set_sound_volume(mmc5_pulse2_duty1_sound, 0)
+			set_sound_volume(mmc5_pulse2_duty2_sound, 0)
+			set_sound_volume(mmc5_pulse2_duty3_sound, 0)
+			set_sound_volume(mmc5_pulse2_duty4_sound, 0)
+		else
+			local duty = bit32.band(bit32.rshift(mmc5_pulse2_control, 6), 0x03) + 1
+			local speed = PULSE_SPEED_NUM / (mmc5_pulse2_timer + 1)
+			local v1 = if duty == 1 then mmc5_pulse2_gain else 0
+			local v2 = if duty == 2 then mmc5_pulse2_gain else 0
+			local v3 = if duty == 3 then mmc5_pulse2_gain else 0
+			local v4 = if duty == 4 then mmc5_pulse2_gain else 0
+			set_sound_speed(mmc5_pulse2_duty1_sound, speed)
+			set_sound_speed(mmc5_pulse2_duty2_sound, speed)
+			set_sound_speed(mmc5_pulse2_duty3_sound, speed)
+			set_sound_speed(mmc5_pulse2_duty4_sound, speed)
+			set_sound_volume(mmc5_pulse2_duty1_sound, v1)
+			set_sound_volume(mmc5_pulse2_duty2_sound, v2)
+			set_sound_volume(mmc5_pulse2_duty3_sound, v3)
+			set_sound_volume(mmc5_pulse2_duty4_sound, v4)
 		end
 
 		if triangle_raw > 0 then
-			newindex(triangle_sound, "PlaybackSpeed", TRIANGLE_SPEED_NUM / (triangle_timer + 1))
-			newindex(triangle_sound, "Volume", triangle_gain)
+			set_sound_speed(tri_sound, TRIANGLE_SPEED_NUM / (triangle_timer + 1))
+			set_sound_volume(tri_sound, triangle_gain)
 		else
-			newindex(triangle_sound, "Volume", 0)
+			set_sound_volume(tri_sound, 0)
 		end
 
 		if #noise_long_sound_bank > 0 and #noise_short_sound_bank > 0 then
@@ -511,32 +573,53 @@ return function (dmc_reader: DmcReader): APUInstance
 
 			for i = 1, #active_bank do
 				local target = if noise_raw > 0 and i == active_index then noise_gain else 0
-				newindex(active_bank[i], "Volume", target)
+				set_sound_volume(active_bank[i], target)
 			end
 			for i = 1, #inactive_bank do
-				newindex(inactive_bank[i], "Volume", 0)
+				set_sound_volume(inactive_bank[i], 0)
 			end
 		end
 	end
 
-	local function clock_pulse_envelope(index: number)
-		if pulse_envelope_start[index] then
-			pulse_envelope_start[index] = false
-			pulse_envelope_decay[index] = 15
-			pulse_envelope_divider[index] = bit32.band(pulse_control[index], 0x0F)
+	local function clock_pulse1_envelope()
+		if pulse1_envelope_start then
+			pulse1_envelope_start = false
+			pulse1_envelope_decay = 15
+			pulse1_envelope_divider = bit32.band(pulse1_control, 0x0F)
 			return
 		end
 
-		if pulse_envelope_divider[index] > 0 then
-			pulse_envelope_divider[index] -= 1
+		if pulse1_envelope_divider > 0 then
+			pulse1_envelope_divider -= 1
 			return
 		end
 
-		pulse_envelope_divider[index] = bit32.band(pulse_control[index], 0x0F)
-		if pulse_envelope_decay[index] > 0 then
-			pulse_envelope_decay[index] -= 1
-		elseif bit32.btest(pulse_control[index], 0x20) then
-			pulse_envelope_decay[index] = 15
+		pulse1_envelope_divider = bit32.band(pulse1_control, 0x0F)
+		if pulse1_envelope_decay > 0 then
+			pulse1_envelope_decay -= 1
+		elseif bit32.btest(pulse1_control, 0x20) then
+			pulse1_envelope_decay = 15
+		end
+	end
+
+	local function clock_pulse2_envelope()
+		if pulse2_envelope_start then
+			pulse2_envelope_start = false
+			pulse2_envelope_decay = 15
+			pulse2_envelope_divider = bit32.band(pulse2_control, 0x0F)
+			return
+		end
+
+		if pulse2_envelope_divider > 0 then
+			pulse2_envelope_divider -= 1
+			return
+		end
+
+		pulse2_envelope_divider = bit32.band(pulse2_control, 0x0F)
+		if pulse2_envelope_decay > 0 then
+			pulse2_envelope_decay -= 1
+		elseif bit32.btest(pulse2_control, 0x20) then
+			pulse2_envelope_decay = 15
 		end
 	end
 
@@ -574,10 +657,11 @@ return function (dmc_reader: DmcReader): APUInstance
 	end
 
 	local function clock_length_counters()
-		for channel = 1, 2 do
-			if pulse_length[channel] > 0 and not bit32.btest(pulse_control[channel], 0x20) then
-				pulse_length[channel] -= 1
-			end
+		if pulse1_length > 0 and not bit32.btest(pulse1_control, 0x20) then
+			pulse1_length -= 1
+		end
+		if pulse2_length > 0 and not bit32.btest(pulse2_control, 0x20) then
+			pulse2_length -= 1
 		end
 
 		if triangle_length > 0 and not bit32.btest(triangle_control, 0x80) then
@@ -589,29 +673,55 @@ return function (dmc_reader: DmcReader): APUInstance
 		end
 	end
 
-	local function clock_pulse_sweep(index: number)
-		local sweep = pulse_sweep[index]
+	local function clock_pulse1_sweep()
+		local sweep = pulse1_sweep
 		local shift = bit32.band(sweep, 0x07)
 		local divider_period = bit32.band(bit32.rshift(sweep, 4), 0x07)
-		local timer = pulse_timer[index]
+		local timer = pulse1_timer
 		local delta = if shift > 0 then bit32.rshift(timer, shift) else 0
 		local target = if bit32.btest(sweep, 0x08)
-			then timer - delta - (if index == 1 then 1 else 0)
+			then timer - delta - 1
 			else timer + delta
 		local enabled = bit32.btest(sweep, 0x80) and shift > 0
 
-		if pulse_sweep_divider[index] == 0 then
+		if pulse1_sweep_divider == 0 then
 			if enabled and timer >= 8 and target >= 0 and target <= 0x7FF then
-				pulse_timer[index] = target
+				pulse1_timer = target
 			end
-			pulse_sweep_divider[index] = divider_period
+			pulse1_sweep_divider = divider_period
 		else
-			pulse_sweep_divider[index] -= 1
+			pulse1_sweep_divider -= 1
 		end
 
-		if pulse_sweep_reload[index] then
-			pulse_sweep_reload[index] = false
-			pulse_sweep_divider[index] = divider_period
+		if pulse1_sweep_reload then
+			pulse1_sweep_reload = false
+			pulse1_sweep_divider = divider_period
+		end
+	end
+
+	local function clock_pulse2_sweep()
+		local sweep = pulse2_sweep
+		local shift = bit32.band(sweep, 0x07)
+		local divider_period = bit32.band(bit32.rshift(sweep, 4), 0x07)
+		local timer = pulse2_timer
+		local delta = if shift > 0 then bit32.rshift(timer, shift) else 0
+		local target = if bit32.btest(sweep, 0x08)
+			then timer - delta
+			else timer + delta
+		local enabled = bit32.btest(sweep, 0x80) and shift > 0
+
+		if pulse2_sweep_divider == 0 then
+			if enabled and timer >= 8 and target >= 0 and target <= 0x7FF then
+				pulse2_timer = target
+			end
+			pulse2_sweep_divider = divider_period
+		else
+			pulse2_sweep_divider -= 1
+		end
+
+		if pulse2_sweep_reload then
+			pulse2_sweep_reload = false
+			pulse2_sweep_divider = divider_period
 		end
 	end
 
@@ -621,20 +731,20 @@ return function (dmc_reader: DmcReader): APUInstance
 		local dmc_counter = dmc_timer_counter
 		local mix_pending = dmc_mix_pending
 		local mix_counter = dmc_mix_counter
-		local frame_len = if apu_frame_mode_5step then APU_FRAME_5_LENGTH else APU_FRAME_4_LENGTH
-		local frame_q4 = if apu_frame_mode_5step then APU_FRAME_Q4_5STEP else APU_FRAME_Q4_4STEP
+		local frame_len = if apu_frame_mode_5step then 37282 else 29830
+		local frame_q4 = if apu_frame_mode_5step then 37281 else 29829
 		if dmc_counter <= 0 then
 			dmc_counter = DMC_PERIOD_TABLE[dmc_period_index + 1]
 		end
 
 		while remaining > 0 do
 			local event_cycle = frame_q4
-			if apu_frame_cycle < APU_FRAME_Q1 then
-				event_cycle = APU_FRAME_Q1
-			elseif apu_frame_cycle < APU_FRAME_Q2 then
-				event_cycle = APU_FRAME_Q2
-			elseif apu_frame_cycle < APU_FRAME_Q3 then
-				event_cycle = APU_FRAME_Q3
+			if apu_frame_cycle < 7457 then
+				event_cycle = 7457
+			elseif apu_frame_cycle < 14913 then
+				event_cycle = 14913
+			elseif apu_frame_cycle < 22371 then
+				event_cycle = 22371
 			elseif apu_frame_cycle < frame_q4 then
 				event_cycle = frame_q4
 			end
@@ -661,25 +771,25 @@ return function (dmc_reader: DmcReader): APUInstance
 			local clock_quarter = false
 			local clock_half = false
 			local set_irq = false
-			if apu_frame_cycle == APU_FRAME_Q1 or apu_frame_cycle == APU_FRAME_Q3 then
+			if apu_frame_cycle == 7457 or apu_frame_cycle == 22371 then
 				clock_quarter = true
-			elseif apu_frame_cycle == APU_FRAME_Q2 then
+			elseif apu_frame_cycle == 14913 then
 				clock_quarter = true
 				clock_half = true
 			elseif apu_frame_mode_5step then
-				if apu_frame_cycle == APU_FRAME_Q4_5STEP then
+				if apu_frame_cycle == 37281 then
 					clock_quarter = true
 					clock_half = true
 				end
-			elseif apu_frame_cycle == APU_FRAME_Q4_4STEP then
+			elseif apu_frame_cycle == 29829 then
 				clock_quarter = true
 				clock_half = true
 				set_irq = true
 			end
 
 			if clock_quarter then
-				clock_pulse_envelope(1)
-				clock_pulse_envelope(2)
+				clock_pulse1_envelope()
+				clock_pulse2_envelope()
 				clock_noise_envelope()
 				clock_triangle_linear_counter()
 				should_mix = true
@@ -687,8 +797,8 @@ return function (dmc_reader: DmcReader): APUInstance
 
 			if clock_half then
 				clock_length_counters()
-				clock_pulse_sweep(1)
-				clock_pulse_sweep(2)
+				clock_pulse1_sweep()
+				clock_pulse2_sweep()
 				should_mix = true
 			end
 
@@ -707,10 +817,10 @@ return function (dmc_reader: DmcReader): APUInstance
 				dmc_counter = DMC_PERIOD_TABLE[dmc_period_index + 1]
 			end
 
-			if mix_pending and mix_counter >= DMC_MIX_REFRESH_CYCLES then
+			if mix_pending and mix_counter >= 1 then
 				should_mix = true
 				mix_pending = false
-				mix_counter = bit32.band(mix_counter, DMC_MIX_REFRESH_CYCLES - 1)
+				mix_counter = 0
 			end
 		end
 
@@ -728,10 +838,10 @@ return function (dmc_reader: DmcReader): APUInstance
 	local function apu_read_status(): number
 		local value = 0
 
-		if pulse_length[1] > 0 then
+		if pulse1_length > 0 then
 			value = bit32.bor(value, 0x01)
 		end
-		if pulse_length[2] > 0 then
+		if pulse2_length > 0 then
 			value = bit32.bor(value, 0x02)
 		end
 		if triangle_length > 0 then
@@ -761,33 +871,33 @@ return function (dmc_reader: DmcReader): APUInstance
 		value = bit32.band(value, 0xFF)
 
 		if addr == 0x4000 then
-			pulse_control[1] = value
+			pulse1_control = value
 		elseif addr == 0x4001 then
-			pulse_sweep[1] = value
-			pulse_sweep_reload[1] = true
+			pulse1_sweep = value
+			pulse1_sweep_reload = true
 		elseif addr == 0x4002 then
-			pulse_timer_low[1] = value
-			pulse_timer[1] = bit32.bor(bit32.band(pulse_timer[1], 0x0700), value)
+			pulse1_timer_low = value
+			pulse1_timer = bit32.bor(bit32.band(pulse1_timer, 0x0700), value)
 		elseif addr == 0x4003 then
-			pulse_timer[1] = bit32.bor(bit32.lshift(bit32.band(value, 0x07), 8), pulse_timer_low[1])
+			pulse1_timer = bit32.bor(bit32.lshift(bit32.band(value, 0x07), 8), pulse1_timer_low)
 			if bit32.btest(channel_enabled_mask, 0x01) then
-				pulse_length[1] = buffer.readu8(LENGTH_BUF, bit32.rshift(value, 3))
+				pulse1_length = buffer.readu8(LENGTH_BUF, bit32.rshift(value, 3))
 			end
-			pulse_envelope_start[1] = true
+			pulse1_envelope_start = true
 		elseif addr == 0x4004 then
-			pulse_control[2] = value
+			pulse2_control = value
 		elseif addr == 0x4005 then
-			pulse_sweep[2] = value
-			pulse_sweep_reload[2] = true
+			pulse2_sweep = value
+			pulse2_sweep_reload = true
 		elseif addr == 0x4006 then
-			pulse_timer_low[2] = value
-			pulse_timer[2] = bit32.bor(bit32.band(pulse_timer[2], 0x0700), value)
+			pulse2_timer_low = value
+			pulse2_timer = bit32.bor(bit32.band(pulse2_timer, 0x0700), value)
 		elseif addr == 0x4007 then
-			pulse_timer[2] = bit32.bor(bit32.lshift(bit32.band(value, 0x07), 8), pulse_timer_low[2])
+			pulse2_timer = bit32.bor(bit32.lshift(bit32.band(value, 0x07), 8), pulse2_timer_low)
 			if bit32.btest(channel_enabled_mask, 0x02) then
-				pulse_length[2] = buffer.readu8(LENGTH_BUF, bit32.rshift(value, 3))
+				pulse2_length = buffer.readu8(LENGTH_BUF, bit32.rshift(value, 3))
 			end
-			pulse_envelope_start[2] = true
+			pulse2_envelope_start = true
 		elseif addr == 0x4008 then
 			triangle_control = value
 			triangle_linear_reload_value = bit32.band(value, 0x7F)
@@ -827,10 +937,10 @@ return function (dmc_reader: DmcReader): APUInstance
 			channel_enabled_mask = bit32.band(value, 0x1F)
 			apu_dmc_irq = false
 			if not bit32.btest(channel_enabled_mask, 0x01) then
-				pulse_length[1] = 0
+				pulse1_length = 0
 			end
 			if not bit32.btest(channel_enabled_mask, 0x02) then
-				pulse_length[2] = 0
+				pulse2_length = 0
 			end
 			if not bit32.btest(channel_enabled_mask, 0x04) then
 				triangle_length = 0
@@ -854,13 +964,13 @@ return function (dmc_reader: DmcReader): APUInstance
 			apu_frame_cycle = 0
 
 			if apu_frame_mode_5step then
-				clock_pulse_envelope(1)
-				clock_pulse_envelope(2)
+				clock_pulse1_envelope()
+				clock_pulse2_envelope()
 				clock_noise_envelope()
 				clock_triangle_linear_counter()
 				clock_length_counters()
-				clock_pulse_sweep(1)
-				clock_pulse_sweep(2)
+				clock_pulse1_sweep()
+				clock_pulse2_sweep()
 			end
 		end
 
@@ -893,20 +1003,20 @@ return function (dmc_reader: DmcReader): APUInstance
 		value = bit32.band(value, 0xFF)
 
 		if addr == 0x5000 then
-			mmc5_pulse_control[1] = value
+			mmc5_pulse1_control = value
 		elseif addr == 0x5002 then
-			mmc5_pulse_timer_low[1] = value
-			mmc5_pulse_timer[1] = bit32.bor(bit32.band(mmc5_pulse_timer[1], 0x0700), value)
+			mmc5_pulse1_timer_low = value
+			mmc5_pulse1_timer = bit32.bor(bit32.band(mmc5_pulse1_timer, 0x0700), value)
 		elseif addr == 0x5003 then
-			mmc5_pulse_timer[1] = bit32.bor(bit32.lshift(bit32.band(value, 0x07), 8), mmc5_pulse_timer_low[1])
+			mmc5_pulse1_timer = bit32.bor(bit32.lshift(bit32.band(value, 0x07), 8), mmc5_pulse1_timer_low)
 			mmc5_pulse_running = bit32.bor(mmc5_pulse_running, 0x01)
 		elseif addr == 0x5004 then
-			mmc5_pulse_control[2] = value
+			mmc5_pulse2_control = value
 		elseif addr == 0x5006 then
-			mmc5_pulse_timer_low[2] = value
-			mmc5_pulse_timer[2] = bit32.bor(bit32.band(mmc5_pulse_timer[2], 0x0700), value)
+			mmc5_pulse2_timer_low = value
+			mmc5_pulse2_timer = bit32.bor(bit32.band(mmc5_pulse2_timer, 0x0700), value)
 		elseif addr == 0x5007 then
-			mmc5_pulse_timer[2] = bit32.bor(bit32.lshift(bit32.band(value, 0x07), 8), mmc5_pulse_timer_low[2])
+			mmc5_pulse2_timer = bit32.bor(bit32.lshift(bit32.band(value, 0x07), 8), mmc5_pulse2_timer_low)
 			mmc5_pulse_running = bit32.bor(mmc5_pulse_running, 0x02)
 		elseif addr == 0x5010 then
 			mmc5_pcm_control = bit32.band(value, 0x81)
@@ -947,26 +1057,26 @@ return function (dmc_reader: DmcReader): APUInstance
 	local function apu_reset()
 		channel_enabled_mask = 0
 
-		pulse_control[1] = 0
-		pulse_control[2] = 0
-		pulse_sweep[1] = 0
-		pulse_sweep[2] = 0
-		pulse_timer_low[1] = 0
-		pulse_timer_low[2] = 0
-		pulse_timer[1] = 0
-		pulse_timer[2] = 0
-		pulse_length[1] = 0
-		pulse_length[2] = 0
-		pulse_envelope_start[1] = false
-		pulse_envelope_start[2] = false
-		pulse_envelope_divider[1] = 0
-		pulse_envelope_divider[2] = 0
-		pulse_envelope_decay[1] = 0
-		pulse_envelope_decay[2] = 0
-		pulse_sweep_divider[1] = 0
-		pulse_sweep_divider[2] = 0
-		pulse_sweep_reload[1] = false
-		pulse_sweep_reload[2] = false
+		pulse1_control = 0
+		pulse2_control = 0
+		pulse1_sweep = 0
+		pulse2_sweep = 0
+		pulse1_timer_low = 0
+		pulse2_timer_low = 0
+		pulse1_timer = 0
+		pulse2_timer = 0
+		pulse1_length = 0
+		pulse2_length = 0
+		pulse1_envelope_start = false
+		pulse2_envelope_start = false
+		pulse1_envelope_divider = 0
+		pulse2_envelope_divider = 0
+		pulse1_envelope_decay = 0
+		pulse2_envelope_decay = 0
+		pulse1_sweep_divider = 0
+		pulse2_sweep_divider = 0
+		pulse1_sweep_reload = false
+		pulse2_sweep_reload = false
 
 		triangle_control = 0
 		triangle_timer_low = 0
@@ -1000,12 +1110,12 @@ return function (dmc_reader: DmcReader): APUInstance
 		dmc_silence = true
 		dmc_dma_stall_cycles = 0
 
-		mmc5_pulse_control[1] = 0
-		mmc5_pulse_control[2] = 0
-		mmc5_pulse_timer_low[1] = 0
-		mmc5_pulse_timer_low[2] = 0
-		mmc5_pulse_timer[1] = 0
-		mmc5_pulse_timer[2] = 0
+		mmc5_pulse1_control = 0
+		mmc5_pulse2_control = 0
+		mmc5_pulse1_timer_low = 0
+		mmc5_pulse2_timer_low = 0
+		mmc5_pulse1_timer = 0
+		mmc5_pulse2_timer = 0
 		mmc5_pulse_running = 0
 		mmc5_pulse_enable = 0
 		mmc5_pcm_control = 0
@@ -1049,3 +1159,4 @@ return function (dmc_reader: DmcReader): APUInstance
 		consumeDmaStallCycles = consume_dmc_dma_stall_cycles,
 	}
 end
+
