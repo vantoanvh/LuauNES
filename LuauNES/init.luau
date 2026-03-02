@@ -15,10 +15,50 @@ local FRAMEBUFFER_SIZE = FRAME_WIDTH * FRAME_HEIGHT * 4
 local FRAME_STRIDE = FRAME_WIDTH * 4
 
 local PALETTE_SIZE = 32
+local PALETTE_ADDR_LUT = buffer.create(PALETTE_SIZE)
+local NAMETABLE_LUTS = {
+	buffer.create(0x1000 * 2),
+	buffer.create(0x1000 * 2),
+	buffer.create(0x1000 * 2),
+	buffer.create(0x1000 * 2),
+	buffer.create(0x1000 * 2),
+}
+
+for i = 0, PALETTE_SIZE - 1 do
+	local mapped = i
+	if bit32.band(i, 0x13) == 0x10 then
+		mapped = i - 0x10
+	end
+	buffer.writeu8(PALETTE_ADDR_LUT, i, mapped)
+end
+
+local SPRITE_PIXEL_LUTS = {
+	buffer.create(0x10000 * 8),
+	buffer.create(0x10000 * 8),
+}
+
+for low = 0, 255 do
+	local low_shifted = bit32.lshift(low, 8)
+	for high = 0, 255 do
+		local pattern = low_shifted + high
+		local pattern_base = bit32.lshift(pattern, 3)
+		for offset = 0, 7 do
+			local normal_bit = 7 - offset
+			local normal_pixel =
+				bit32.band(bit32.rshift(low, normal_bit), 1)
+				+ bit32.lshift(bit32.band(bit32.rshift(high, normal_bit), 1), 1)
+			local flip_pixel =
+				bit32.band(bit32.rshift(low, offset), 1)
+				+ bit32.lshift(bit32.band(bit32.rshift(high, offset), 1), 1)
+
+			buffer.writeu8(SPRITE_PIXEL_LUTS[1], pattern_base + offset, normal_pixel)
+			buffer.writeu8(SPRITE_PIXEL_LUTS[2], pattern_base + offset, flip_pixel)
+		end
+	end
+end
 
 local framebuffer = buffer.create(FRAMEBUFFER_SIZE)
 local palette = buffer.create(PALETTE_SIZE)
-local bg_data = buffer.create(FRAME_WIDTH)
 local prg_ram = buffer.create(0x2000)
 local vram = buffer.create(0x1000)
 local oam = buffer.create(0x100)
@@ -36,9 +76,7 @@ local sprite_meta_next = buffer.create(8)
 local sprite_low_next = buffer.create(8)
 local sprite_x_next = buffer.create(8)
 local sprite_pattern_addr_next = buffer.create(16)
-local sprite_scanline_color = buffer.create(FRAME_WIDTH)
-local sprite_scanline_meta = buffer.create(FRAME_WIDTH)
-local sprite_scanline_stamp = buffer.create(FRAME_WIDTH)
+local sprite_scanline_data = buffer.create(FRAME_WIDTH * 4)
 local sprite_scanline_generation = 1
 
 local prg_rom = buffer.create(0)
@@ -56,10 +94,7 @@ local ppu_status = 0
 local addr_value = 0
 local dma_cycles = 0
 
-local prg_banks = 0
-local chr_banks = 0
 local mirroring_mode = 3
-local mapper_id = 0
 local mapper = nil :: Mapper?
 
 local mapper_map_prg_addr = nil :: ((number) -> number)?
@@ -76,7 +111,24 @@ local mapper_irq_pending = nil :: (() -> boolean)?
 local mapper_get_mirroring = nil :: (() -> number)?
 local mapper_prg_ram_readable = nil :: (() -> boolean)?
 local mapper_prg_ram_writable = nil :: (() -> boolean)?
+local mapper_has_map_prg_addr = false
+local mapper_has_map_chr_addr = false
+local mapper_has_read_cpu = false
+local mapper_has_write_cpu = false
+local mapper_has_read_nametable = false
+local mapper_has_write_nametable = false
+local mapper_has_map_prg_ram_addr = false
+local mapper_has_irq_pending = false
+local mapper_has_get_mirroring = false
+local mapper_has_scanline_clock = false
+local mapper_has_a12_clock = false
+local mapper_has_ppu_address_hook = false
+local mapper_has_prg_ram_readable = false
+local mapper_has_prg_ram_writable = false
+local mapper_needs_sprite_fetch = false
+local mapper_is_mmc5 = false
 local four_screen_mode = false
+local active_nametable_lut = NAMETABLE_LUTS[4]
 
 local scanline = 0
 local ppu_cycle = 0
@@ -135,13 +187,11 @@ local nmi_output = false
 local pad_strobe = 0
 
 local page_crossed = false
-local indexed_dummy_valid = false
 local indexed_dummy_addr = 0
 local frame_ready = false
 local chr_is_ram = false
 local odd_frame = false
 local open_bus = 0
-local frame_index = 0
 local mmc3_a12_sampled = false
 local in_ppu_step = false
 local cpu_instruction_active = false
@@ -185,10 +235,48 @@ local RAW_PALETTE = {
 
 }
 
-local nes_rgba32 = table.create(64, 0xFF000000)
-local palette_rgba32 = table.create(32, 0xFF000000)
+local function build_nametable_lut(target: buffer, mode: number, is_four_screen: boolean)
+	for offset = 0, 0x0FFF do
+		local mapped = offset
+		if not is_four_screen then
+			local table_index = bit32.rshift(offset, 10)
+			local inner = bit32.band(offset, 0x03FF)
+			if mode == 0 then
+				mapped = inner
+			elseif mode == 1 then
+				mapped = 0x0400 + inner
+			elseif mode == 2 then
+				mapped = bit32.band(table_index, 1) * 0x0400 + inner
+			else
+				mapped = if table_index < 2 then inner else 0x0400 + inner
+			end
+		end
+		buffer.writeu16(target, offset * 2, mapped)
+	end
+end
 
-palette_rgba32[0] = 0xFF000000
+build_nametable_lut(NAMETABLE_LUTS[1], 0, false)
+build_nametable_lut(NAMETABLE_LUTS[2], 1, false)
+build_nametable_lut(NAMETABLE_LUTS[3], 2, false)
+build_nametable_lut(NAMETABLE_LUTS[4], 3, false)
+build_nametable_lut(NAMETABLE_LUTS[5], 0, true)
+
+local function refresh_nametable_lut()
+	if four_screen_mode then
+		active_nametable_lut = NAMETABLE_LUTS[5]
+	elseif mirroring_mode == 0 then
+		active_nametable_lut = NAMETABLE_LUTS[1]
+	elseif mirroring_mode == 1 then
+		active_nametable_lut = NAMETABLE_LUTS[2]
+	elseif mirroring_mode == 2 then
+		active_nametable_lut = NAMETABLE_LUTS[3]
+	else
+		active_nametable_lut = NAMETABLE_LUTS[4]
+	end
+end
+
+local nes_rgba32 = buffer.create(64 * 4)
+local palette_rgba32 = buffer.create(64 * 4)
 
 for i = 0, 63 do
 	local rgb = RAW_PALETTE[i + 1]
@@ -197,7 +285,7 @@ for i = 0, 63 do
 	local g = bit32.band(bit32.rshift(rgb, 8), 255)
 	local b = bit32.band(rgb, 0xFF)
 
-	nes_rgba32[i] = r + bit32.lshift(g, 8) + bit32.lshift(b, 16) + 0xFF000000
+	buffer.writeu32(nes_rgba32, i * 4, r + bit32.lshift(g, 8) + bit32.lshift(b, 16) + 0xFF000000)
 end
 
 local function bind_mapper(mapper_value: Mapper?)
@@ -218,6 +306,21 @@ local function bind_mapper(mapper_value: Mapper?)
 		mapper_get_mirroring = mapper.getMirroring
 		mapper_prg_ram_readable = mapper.prgRamReadable
 		mapper_prg_ram_writable = mapper.prgRamWritable
+		mapper_has_map_prg_addr = mapper_map_prg_addr ~= nil
+		mapper_has_map_chr_addr = mapper_map_chr_addr ~= nil
+		mapper_has_read_cpu = mapper_read_cpu ~= nil
+		mapper_has_write_cpu = mapper_write_cpu ~= nil
+		mapper_has_read_nametable = mapper_read_nametable ~= nil
+		mapper_has_write_nametable = mapper_write_nametable ~= nil
+		mapper_has_map_prg_ram_addr = mapper_map_prg_ram_addr ~= nil
+		mapper_has_irq_pending = mapper_irq_pending ~= nil
+		mapper_has_get_mirroring = mapper_get_mirroring ~= nil
+		mapper_has_scanline_clock = mapper_clock_scanline ~= nil
+		mapper_has_a12_clock = mapper_clock_a12 ~= nil
+		mapper_has_ppu_address_hook = mapper_on_ppu_address ~= nil
+		mapper_has_prg_ram_readable = mapper_prg_ram_readable ~= nil
+		mapper_has_prg_ram_writable = mapper_prg_ram_writable ~= nil
+		mapper_needs_sprite_fetch = mapper_has_a12_clock or mapper_has_ppu_address_hook
 	else
 		mapper_map_prg_addr = nil
 		mapper_map_chr_addr = nil
@@ -233,11 +336,28 @@ local function bind_mapper(mapper_value: Mapper?)
 		mapper_get_mirroring = nil
 		mapper_prg_ram_readable = nil
 		mapper_prg_ram_writable = nil
+		mapper_has_map_prg_addr = false
+		mapper_has_map_chr_addr = false
+		mapper_has_read_cpu = false
+		mapper_has_write_cpu = false
+		mapper_has_read_nametable = false
+		mapper_has_write_nametable = false
+		mapper_has_map_prg_ram_addr = false
+		mapper_has_irq_pending = false
+		mapper_has_get_mirroring = false
+		mapper_has_scanline_clock = false
+		mapper_has_a12_clock = false
+		mapper_has_ppu_address_hook = false
+		mapper_has_prg_ram_readable = false
+		mapper_has_prg_ram_writable = false
+		mapper_needs_sprite_fetch = false
 	end
+
+	refresh_nametable_lut()
 end
 
 local function prg_read(addr: number): number
-	if mapper_map_prg_addr == nil or prg_rom_len <= 0 then
+	if (not mapper_has_map_prg_addr) or prg_rom_len <= 0 then
 		return 0
 	end
 
@@ -249,56 +369,34 @@ local function prg_read(addr: number): number
 	return buffer.readu8(prg_rom, offset)
 end
 
-local function map_chr_addr(addr: number, fetch_kind: number?): number
-	return if mapper_map_chr_addr then mapper_map_chr_addr(addr, fetch_kind or 0, ctrl_sprite_8x16) else bit32.band(addr, 0x1FFF)
-end
-
 local function chr_read(addr: number, fetch_kind: number?): number
-	if chr_rom_len <= 0 then
+	if chr_rom_len > 0 then
+		local kind = fetch_kind or 0
+
+		local mapped = if mapper_has_map_chr_addr
+			then mapper_map_chr_addr(addr, kind, ctrl_sprite_8x16)
+			else bit32.band(addr, 0x1FFF)
+
+		return if mapped < 0 or mapped >= chr_rom_len then 0 else buffer.readu8(chr_rom, mapped)
+	else
 		return 0
 	end
-
-	local mapped = map_chr_addr(addr, fetch_kind)
-	return if mapped < 0 or mapped >= chr_rom_len then 0 else buffer.readu8(chr_rom, mapped)
-end
-
-local function chr_write(addr: number, value: number, fetch_kind: number?)
-	if chr_is_ram then
-		if chr_rom_len <= 0 then
-			return
-		end
-
-		local mapped = map_chr_addr(addr, fetch_kind)
-		if mapped >= 0 and mapped < chr_rom_len then
-			buffer.writeu8(chr_rom, mapped, value)
-		end
-	end
-end
-
-local function mirror_nametable(addr: number): number
-	local offset = bit32.band(addr, 0x0FFF)
-	if four_screen_mode then return offset end
-
-	local table_index = bit32.band(bit32.rshift(offset, 10), 0x03)
-	local inner = bit32.band(offset, 0x03FF)
-
-	if mirroring_mode == 0 then
-		return inner
-	elseif mirroring_mode == 1 then
-		return 0x0400 + inner
-	elseif mirroring_mode == 2 then
-		return bit32.band(table_index, 1) * 0x0400 + inner
-	end
-
-	return if table_index < 2 then inner else 0x0400 + inner
-end
-
-local function sync_palette_cache(index: number)
-	palette_rgba32[index] = nes_rgba32[bit32.band(buffer.readu8(palette, index), 0x3F)] or 0xFF000000
 end
 
 for i = 0, PALETTE_SIZE - 1 do
-	sync_palette_cache(i)
+	local base_color_index = bit32.band(buffer.readu8(palette, i), 0x3F)
+
+	buffer.writeu32(
+		palette_rgba32,
+		i * 4,
+		buffer.readu32(nes_rgba32, base_color_index * 4)
+	)
+
+	buffer.writeu32(
+		palette_rgba32,
+		(i + 32) * 4,
+		buffer.readu32(nes_rgba32, bit32.band(base_color_index, 0x30) * 4)
+	)
 end
 
 local apu = APU(prg_read)
@@ -315,67 +413,101 @@ local apu_irq_pending = apu.irqPending
 local apu_consume_dma_stall_cycles = apu.consumeDmaStallCycles
 
 local function ppu_read(addr: number, fetch_kind: number?)
-	addr = bit32.band(addr, 0x3FFF)
+	if addr >= 0x4000 then
+		addr = bit32.band(addr, 0x3FFF)
+	end
 
-	if mapper_on_ppu_address then
+	if mapper_has_ppu_address_hook then
 		mapper_on_ppu_address(addr, scanline, ppu_cycle + 1, mask_rendering)
 	end
 
 	if addr < 0x2000 then
-		if mapper_id == 4 then
+		if mapper_has_a12_clock then
 			local a12_high = bit32.btest(addr, 0x1000)
 			if in_ppu_step then
 				mmc3_a12_sampled = a12_high
-			elseif mapper_clock_a12 then
+			else
 				mapper_clock_a12(a12_high)
 			end
 		end
-		return chr_read(addr, fetch_kind)
+		
+		if chr_rom_len > 0 then
+			local kind = fetch_kind or 0
+
+			local mapped = if mapper_has_map_chr_addr
+				then mapper_map_chr_addr(addr, kind, ctrl_sprite_8x16)
+				else bit32.band(addr, 0x1FFF)
+
+			return if mapped < 0 or mapped >= chr_rom_len then 0 else buffer.readu8(chr_rom, mapped)
+		else
+			return 0
+		end
 	end
 
 	if addr < 0x3F00 then
-		if mapper_read_nametable then
+		if mapper_has_read_nametable then
 			local value = mapper_read_nametable(addr)
 			if value then
 				return bit32.band(value, 0xFF)
 			end
 		end
-		return buffer.readu8(vram, mirror_nametable(addr))
+		local nametable_offset = bit32.band(addr, 0x0FFF)
+		return buffer.readu8(vram, buffer.readu16(active_nametable_lut, nametable_offset * 2))
 	end
 
-	local index = bit32.band(addr, 0x1F)
-	if bit32.band(index, 0x13) == 0x10 then
-		index -= 0x10
-	end
+	local index = buffer.readu8(PALETTE_ADDR_LUT, bit32.band(addr, 0x1F))
 	return buffer.readu8(palette, index)
 end
 
 local function ppu_write(addr: number, value: number, fetch_kind: number?)
-	addr = bit32.band(addr, 0x3FFF)
+	if addr >= 0x4000 then
+		addr = bit32.band(addr, 0x3FFF)
+	end
 	value = bit32.band(value, 0xFF)
 
 	if addr < 0x2000 then
-		if mapper_id == 4 then
+		if mapper_has_a12_clock then
 			local a12_high = bit32.btest(addr, 0x1000)
 			if in_ppu_step then
 				mmc3_a12_sampled = a12_high
-			elseif mapper_clock_a12 then
+			else
 				mapper_clock_a12(a12_high)
 			end
 		end
-		chr_write(addr, value, fetch_kind)
+		
+		if chr_is_ram and chr_rom_len > 0 then
+			local kind = fetch_kind or 0
+			
+			local mapped = if mapper_has_map_chr_addr
+				then mapper_map_chr_addr(addr, kind, ctrl_sprite_8x16)
+				else bit32.band(addr, 0x1FFF)
+			
+			if mapped >= 0 and mapped < chr_rom_len then
+				buffer.writeu8(chr_rom, mapped, value)
+			end
+		end
 	else
 		if addr < 0x3F00 then
-			if mapper_write_nametable == nil or not mapper_write_nametable(addr, value) then
-				buffer.writeu8(vram, mirror_nametable(addr), value)
+			if (not mapper_has_write_nametable) or not mapper_write_nametable(addr, value) then
+				buffer.writeu8(vram, buffer.readu16(active_nametable_lut, bit32.band(addr, 0x0FFF) * 2), value)
 			end
 		else
-			local index = bit32.band(addr, 0x1F)
-			if bit32.band(index, 0x13) == 0x10 then
-				index -= 0x10
-			end
+			local index = buffer.readu8(PALETTE_ADDR_LUT, bit32.band(addr, 0x1F))
+			
 			buffer.writeu8(palette, index, value)
-			sync_palette_cache(index)
+			local base_color_index = bit32.band(buffer.readu8(palette, index), 0x3F)
+
+			buffer.writeu32(
+				palette_rgba32,
+				index * 4,
+				buffer.readu32(nes_rgba32, base_color_index * 4)
+			)
+
+			buffer.writeu32(
+				palette_rgba32,
+				(index + 32) * 4,
+				buffer.readu32(nes_rgba32, bit32.band(base_color_index, 0x30) * 4)
+			)
 		end
 	end
 end
@@ -394,6 +526,34 @@ local function reset_bg_pipeline()
 end
 
 local function run_ppu_cycles(count: number)
+	local has_a12_clock = mapper_has_a12_clock
+	local clock_a12 = mapper_clock_a12
+	local needs_mapper_sprite_fetch = mapper_needs_sprite_fetch
+	local has_scanline_clock = mapper_has_scanline_clock
+	local has_get_mirroring = mapper_has_get_mirroring
+	
+	local show_bg = mask_show_bg
+	local show_sp = mask_show_sp
+	local bg_left = mask_bg_left
+	local sp_left = mask_sp_left
+	
+	local bg_left_min_px = if bg_left then 0 else 8
+	local sp_left_min_px = if sp_left then 0 else 8
+	
+	local grayscale_palette_offset = if mask_grayscale then 32 else 0
+	
+	local rendering = mask_rendering
+	
+	local bg_mux = bit32.rshift(0x8000, fine_x)
+	
+	local sprite_height = ctrl_sprite_height
+	local sprite_pattern_base = ctrl_sprite_pattern_base
+	local bg_pattern_base = ctrl_bg_pattern_base
+	local sprite_scanline_data_buf = sprite_scanline_data
+	
+	local sprite_pixel_lut_normal = SPRITE_PIXEL_LUTS[1]
+	local sprite_pixel_lut_flip = SPRITE_PIXEL_LUTS[2]
+
 	for _ = 1, count do
 		in_ppu_step = true
 
@@ -404,24 +564,19 @@ local function run_ppu_cycles(count: number)
 		local visible_line = current_scanline < 240
 		local pre_render_line = current_scanline == 261
 
-		local show_bg = mask_show_bg
-		local show_sp = mask_show_sp
-		local bg_left = mask_bg_left
-		local sp_left = mask_sp_left
-		local grayscale = mask_grayscale
-		local rendering = mask_rendering
-
-		local bg_mux = bit32.rshift(0x8000, fine_x)
-
 		mmc3_a12_sampled = false
 
 		if current_dot == 0 then
-			if mapper_clock_scanline then
+			if has_scanline_clock then
 				mapper_clock_scanline(current_scanline)
 			end
 
-			if mapper_get_mirroring then
-				mirroring_mode = mapper_get_mirroring()
+			if has_get_mirroring then
+				local mapper_mirroring = mapper_get_mirroring()
+				if mapper_mirroring ~= mirroring_mode then
+					mirroring_mode = mapper_mirroring
+					refresh_nametable_lut()
+				end
 			end
 
 			if visible_line then
@@ -453,13 +608,14 @@ local function run_ppu_cycles(count: number)
 				end
 
 				if sprite_scanline_generation == 0xFF then
-					buffer.fill(sprite_scanline_stamp, 0, 0, FRAME_WIDTH)
+					buffer.fill(sprite_scanline_data_buf, 0, 0, FRAME_WIDTH * 4)
 					sprite_scanline_generation = 1
 				else
 					sprite_scanline_generation += 1
 				end
 
 				local generation = sprite_scanline_generation
+				local generation_bits = bit32.lshift(generation, 16)
 
 				for i = 0, visible_sprite_count - 1 do
 					local sx = buffer.readu8(sprite_x, i)
@@ -474,53 +630,24 @@ local function run_ppu_cycles(count: number)
 						continue
 					end
 
-					local palette_base = bit32.band(meta, 0x1F)
-					local flip_horizontal = bit32.btest(meta, 0x20)
-
-					if flip_horizontal then
-						for offset = 0, 7 do
-							local px = sx + offset
-							if px >= FRAME_WIDTH then
-								break
-							end
-
-							if buffer.readu8(sprite_scanline_stamp, px) == generation then
-								continue
-							end
-
-							local sp_lo = bit32.band(bit32.rshift(sp_low, offset), 1)
-							local sp_hi = bit32.lshift(bit32.band(bit32.rshift(sp_high, offset), 1), 1)
-							local pixel = bit32.bor(sp_lo, sp_hi)
-							if pixel == 0 then
-								continue
-							end
-
-							buffer.writeu8(sprite_scanline_color, px, palette_base + pixel)
-							buffer.writeu8(sprite_scanline_meta, px, meta)
-							buffer.writeu8(sprite_scanline_stamp, px, generation)
+					local pixel_lut = if bit32.btest(meta, 0x20) then sprite_pixel_lut_flip else sprite_pixel_lut_normal
+					
+					local pixel_base = (sp_low * 256 + sp_high) * 8
+					local scanline_meta_base = generation_bits + meta * 256 + bit32.band(meta, 0x1F)
+					
+					for offset = 0, 7 do
+						local px = sx + offset
+						if px >= FRAME_WIDTH then
+							break
 						end
-					else
-						for offset = 0, 7 do
-							local px = sx + offset
-							if px >= FRAME_WIDTH then
-								break
-							end
 
-							if buffer.readu8(sprite_scanline_stamp, px) == generation then
-								continue
+						local scanline_off = px * 4
+						local current = buffer.readu32(sprite_scanline_data_buf, scanline_off)
+						if bit32.band(bit32.rshift(current, 16), 0xFF) ~= generation then
+							local pixel = buffer.readu8(pixel_lut, pixel_base + offset)
+							if pixel ~= 0 then
+								buffer.writeu32(sprite_scanline_data_buf, scanline_off, scanline_meta_base + pixel)
 							end
-
-							local bit_pos = 7 - offset
-							local sp_lo = bit32.band(bit32.rshift(sp_low, bit_pos), 1)
-							local sp_hi = bit32.lshift(bit32.band(bit32.rshift(sp_high, bit_pos), 1), 1)
-							local pixel = bit32.bor(sp_lo, sp_hi)
-							if pixel == 0 then
-								continue
-							end
-
-							buffer.writeu8(sprite_scanline_color, px, palette_base + pixel)
-							buffer.writeu8(sprite_scanline_meta, px, meta)
-							buffer.writeu8(sprite_scanline_stamp, px, generation)
 						end
 					end
 				end
@@ -541,29 +668,33 @@ local function run_ppu_cycles(count: number)
 		if visible_line and cycle >= 1 and cycle <= 256 then
 			local px = cycle - 1
 			local bg = 0
-			if show_bg and (px >= 8 or bg_left) then
-				local bg_lo = bit32.btest(bg_shift_pat_low, bg_mux) and 1 or 0
-				local bg_hi = bit32.btest(bg_shift_pat_high, bg_mux) and 1 or 0
-				local at_lo = bit32.btest(bg_shift_attr_low, bg_mux) and 1 or 0
-				local at_hi = bit32.btest(bg_shift_attr_high, bg_mux) and 1 or 0
+			if show_bg and px >= bg_left_min_px then
+				bg = bit32.bor(bit32.lshift(
+					bit32.bor( -- palette_bits
+						bit32.btest(bg_shift_attr_low, bg_mux) and 1 or 0,
+						bit32.btest(bg_shift_attr_high, bg_mux) and 2 or 0
+					), 2),
 
-				local pixel = bit32.bor(bg_lo, bit32.lshift(bg_hi, 1))
-				local palette_bits = bit32.bor(at_lo, bit32.lshift(at_hi, 1))
-
-				bg = bit32.bor(bit32.lshift(palette_bits, 2), pixel)
+					bit32.bor( -- pixel
+						bit32.btest(bg_shift_pat_low, bg_mux) and 1 or 0,
+						bit32.btest(bg_shift_pat_high, bg_mux) and 2 or 0
+					)
+				)
 			end
 
 			local bg_pixel = bit32.band(bg, 0x03)
 
 			local sp_pixel = 0
 			local sp_color_index = 0
+			
 			local sp_is_behind = false
 			local is_sprite_zero = false
 
-			if show_sp and (px >= 8 or sp_left) then
-				if buffer.readu8(sprite_scanline_stamp, px) == sprite_generation then
-					local meta = buffer.readu8(sprite_scanline_meta, px)
-					sp_color_index = buffer.readu8(sprite_scanline_color, px)
+			if show_sp and px >= sp_left_min_px then
+				local sprite_entry = buffer.readu32(sprite_scanline_data_buf, px * 4)
+				if bit32.band(bit32.rshift(sprite_entry, 16), 0xFF) == sprite_generation then
+					local meta = bit32.band(bit32.rshift(sprite_entry, 8), 0xFF)
+					sp_color_index = bit32.band(sprite_entry, 0xFF)
 					sp_pixel = bit32.band(sp_color_index, 0x03)
 					sp_is_behind = bit32.btest(meta, 0x40)
 					is_sprite_zero = bit32.btest(meta, 0x80)
@@ -571,8 +702,9 @@ local function run_ppu_cycles(count: number)
 			end
 
 			local color_index = 0
+			
 			if bg_pixel == 0 and sp_pixel == 0 then
-				color_index = 0
+				-- do nothing
 			elseif bg_pixel == 0 then
 				color_index = sp_color_index
 			elseif sp_pixel == 0 then
@@ -589,17 +721,9 @@ local function run_ppu_cycles(count: number)
 				end
 			end
 
-			local out_color = palette_rgba32[color_index] or 0xFF000000
-			if grayscale then
-				local index = bit32.band(color_index, 0x1F)
-				if bit32.band(index, 0x13) == 0x10 then
-					index -= 0x10
-				end
-				local gray = bit32.band(buffer.readu8(palette, index), 0x30)
-				out_color = nes_rgba32[gray] or 0xFF000000
-			end
-
-			buffer.writeu32(framebuffer, frame_row_start + px * 4, out_color)
+			buffer.writeu32(framebuffer, frame_row_start + px * 4,
+				buffer.readu32(palette_rgba32, (color_index + grayscale_palette_offset) * 4)
+			)
 		end
 
 		if pre_render_line and cycle == 1 then
@@ -622,8 +746,8 @@ local function run_ppu_cycles(count: number)
 				sprite_overflow_next = false
 
 				sprite_eval_target_scanline = line_y
-				sprite_eval_sprite_height = ctrl_sprite_height
-				sprite_eval_pattern_base = ctrl_sprite_pattern_base
+				sprite_eval_sprite_height = sprite_height
+				sprite_eval_pattern_base = sprite_pattern_base
 				sprite_eval_stage = 0
 				sprite_eval_n = 0
 				sprite_eval_overflow_m = 0
@@ -632,7 +756,7 @@ local function run_ppu_cycles(count: number)
 				sprite_eval_candidate_tile = 0
 				sprite_eval_candidate_attr = 0
 
-				if line_y < 0 or line_y >= 240 or (not mask_show_sp) then
+				if line_y >= 240 or (not mask_show_sp) then
 					sprite_eval_active = false
 				else
 					sprite_eval_active = true
@@ -677,14 +801,10 @@ local function run_ppu_cycles(count: number)
 				if sprite_eval_n >= 64 then
 					sprite_eval_active = false
 				else
-					local odd_cycle = bit32.band(cycle, 1) == 1
-					if odd_cycle then
+					if bit32.btest(cycle, 1) then
 						local oam_base = sprite_eval_n * 4
-						if sprite_eval_stage == 4 then
-							sprite_eval_latch = buffer.readu8(oam, oam_base + sprite_eval_overflow_m)
-						else
-							sprite_eval_latch = buffer.readu8(oam, oam_base + sprite_eval_stage)
-						end
+						
+						sprite_eval_latch =buffer.readu8(oam, sprite_eval_n * 4 + (sprite_eval_stage == 4 and sprite_eval_overflow_m or sprite_eval_stage))
 					elseif sprite_eval_stage == 0 then
 						local row = sprite_eval_target_scanline - (sprite_eval_latch + 1)
 						if row < 0 or row >= sprite_eval_sprite_height then
@@ -716,6 +836,7 @@ local function run_ppu_cycles(count: number)
 
 						local row = sprite_eval_target_scanline - (sy + 1)
 						local row_in_tile = row
+						
 						if bit32.btest(attr, 0x80) then
 							row_in_tile = sprite_eval_sprite_height - 1 - row
 						end
@@ -744,11 +865,15 @@ local function run_ppu_cycles(count: number)
 						end
 
 						local out_index = next_visible_sprite_count
+						
 						buffer.writeu8(sprite_x_next, out_index, sx)
-						local pattern_value = bit32.band(pattern_addr, 0x1FFF)
+						
+						local pattern_value = pattern_addr
 						local pattern_off = out_index * 2
+						
 						buffer.writeu16(sprite_pattern_addr_next, pattern_off, pattern_value)
 						buffer.writeu8(sprite_meta_next, out_index, meta)
+						
 						next_visible_sprite_count += 1
 
 						sprite_eval_n += 1
@@ -775,10 +900,10 @@ local function run_ppu_cycles(count: number)
 
 			-- // tick bg fetch pi
 			if show_bg and ((cycle >= 1 and cycle <= 256) or (cycle >= 321 and cycle <= 336)) then
-				bg_shift_pat_low = bit32.band(bit32.lshift(bg_shift_pat_low, 1), 0xFFFF)
-				bg_shift_pat_high = bit32.band(bit32.lshift(bg_shift_pat_high, 1), 0xFFFF)
-				bg_shift_attr_low = bit32.band(bit32.lshift(bg_shift_attr_low, 1), 0xFFFF)
-				bg_shift_attr_high = bit32.band(bit32.lshift(bg_shift_attr_high, 1), 0xFFFF)
+				bg_shift_pat_low = bit32.band(bg_shift_pat_low * 2, 0xFFFF)
+				bg_shift_pat_high = bit32.band(bg_shift_pat_high * 2, 0xFFFF)
+				bg_shift_attr_low = bit32.band(bg_shift_attr_low * 2, 0xFFFF)
+				bg_shift_attr_high = bit32.band(bg_shift_attr_high * 2, 0xFFFF)
 
 				local phase = bit32.band(cycle, 0x07)
 
@@ -802,18 +927,18 @@ local function run_ppu_cycles(count: number)
 					bg_attr_latch_high = bit32.band(bit32.rshift(attr_bits, 1), 0x01)
 				elseif phase == 5 then
 					local fine_y = bit32.band(bit32.rshift(v, 12), 0x07)
-					local pattern_addr = ctrl_bg_pattern_base + bg_nt_byte * 16 + fine_y
+					local pattern_addr = bg_pattern_base + bg_nt_byte * 16 + fine_y
 					bg_low_byte = ppu_read(pattern_addr, 1)
 				elseif phase == 7 then
 					local fine_y = bit32.band(bit32.rshift(v, 12), 0x07)
-					local pattern_addr = ctrl_bg_pattern_base + bg_nt_byte * 16 + fine_y
+					local pattern_addr = bg_pattern_base + bg_nt_byte * 16 + fine_y
 					bg_high_byte = ppu_read(pattern_addr + 8, 1)
 				elseif phase == 0 then
 					bg_shift_pat_low = bit32.bor(bit32.band(bg_shift_pat_low, 0xFF00), bg_low_byte)
 					bg_shift_pat_high = bit32.bor(bit32.band(bg_shift_pat_high, 0xFF00), bg_high_byte)
 
-					local attr_fill_low = if bg_attr_latch_low ~= 0 then 0xFF else 0x00
-					local attr_fill_high = if bg_attr_latch_high ~= 0 then 0xFF else 0x00
+					local attr_fill_low = bg_attr_latch_low * 0xFF
+					local attr_fill_high = bg_attr_latch_high * 0xFF
 					bg_shift_attr_low = bit32.bor(bit32.band(bg_shift_attr_low, 0xFF00), attr_fill_low)
 					bg_shift_attr_high = bit32.bor(bit32.band(bg_shift_attr_high, 0xFF00), attr_fill_high)
 
@@ -826,34 +951,36 @@ local function run_ppu_cycles(count: number)
 				end
 			end
 
-			if (show_bg or show_sp) and (cycle == 337 or cycle == 339) then
+			if cycle == 337 or cycle == 339 then
 				ppu_read(bit32.bor(0x2000, bit32.band(v, 0x0FFF)))
 			end
 
-			if cycle >= 257 and cycle <= 320 and rendering then
+			if cycle >= 257 and cycle <= 320 then
 				local slot_phase = bit32.band(cycle - 257, 0x07)
 				if slot_phase == 4 or slot_phase == 6 then
 					local slot = bit32.rshift(cycle - 257, 3)
 					local pattern_addr = 0x1FF0
 					local has_sprite = slot < next_visible_sprite_count
-					local needs_mapper_sprite_fetch = mapper_id == 4 or mapper_on_ppu_address
 
 					if has_sprite or needs_mapper_sprite_fetch then
 						if has_sprite then
-							local pattern_off = slot * 2
-							pattern_addr = bit32.bor(
-								buffer.readu8(sprite_pattern_addr_next, pattern_off),
-								bit32.lshift(buffer.readu8(sprite_pattern_addr_next, pattern_off + 1), 8)
-							)
-							pattern_addr = bit32.band(pattern_addr, 0x1FFF)
+							pattern_addr = buffer.readu16(sprite_pattern_addr_next, bit32.lshift(slot, 1))
 						end
 
-						local value_addr = if slot_phase == 4 then pattern_addr else bit32.band(pattern_addr + 8, 0x1FFF)
+						local value_addr = if slot_phase == 4 then pattern_addr else pattern_addr + 8
 						local value = 0
 						if needs_mapper_sprite_fetch then
 							value = ppu_read(value_addr, 2)
 						else
-							value = chr_read(value_addr, 2)
+							if chr_rom_len > 0 then
+								local mapped = if mapper_has_map_chr_addr
+									then mapper_map_chr_addr(value_addr, 2, ctrl_sprite_8x16)
+									else bit32.band(value_addr, 0x1FFF)
+
+								value = if mapped < 0 or mapped >= chr_rom_len then 0 else buffer.readu8(chr_rom, mapped)
+							else
+								value = 0
+							end
 						end
 
 						if has_sprite then
@@ -868,8 +995,8 @@ local function run_ppu_cycles(count: number)
 			end
 		end
 
-		if mapper_id == 4 and mapper_clock_a12 then
-			mapper_clock_a12(mmc3_a12_sampled)
+		if has_a12_clock and clock_a12 then
+			clock_a12(mmc3_a12_sampled)
 		end
 
 		if rendering and pre_render_line and odd_frame and current_dot == 339 then
@@ -877,7 +1004,6 @@ local function run_ppu_cycles(count: number)
 			scanline = 0
 			frame_ready = true
 			odd_frame = not odd_frame
-			frame_index += 1
 			in_ppu_step = false
 			continue
 		end
@@ -891,7 +1017,6 @@ local function run_ppu_cycles(count: number)
 				scanline = 0
 				frame_ready = true
 				odd_frame = not odd_frame
-				frame_index += 1
 			end
 		end
 
@@ -944,15 +1069,6 @@ local function flush_cpu_timing(flush_apu: boolean?)
 	if flush_apu == true then
 		flush_apu_timing()
 	end
-end
-
-local function cpu_bus_tick()
-	if not cpu_instruction_active or in_dma_transfer then
-		return
-	end
-
-	cpu_bus_cycles += 1
-	cpu_pending_cycles += 1
 end
 
 local function finalize_cpu_event(total_cycles: number)
@@ -1044,13 +1160,6 @@ local function register_write(reg: number, value: number)
 	end
 end
 
-local function strobe(value)
-	pad_strobe = bit32.band(value, 0x01)
-	if pad_strobe == 1 then
-		buffer.writeu16(pad_index, 0, 0)
-	end
-end
-
 local function inp_read(port)
 	if port == 0 or port == 1 then
 		local index = buffer.readu8(pad_index, port)
@@ -1070,34 +1179,33 @@ local function inp_read(port)
 	return 0x40
 end
 
-local function mapper_write(addr: number, value: number)
-	if mapper_write_cpu then
-		mapper_write_cpu(addr, value)
-		if mapper_get_mirroring then
-			mirroring_mode = mapper_get_mirroring()
-		end
-	end
-end
-
-local function resolve_prg_ram_addr(addr: number): number?
-	return if mapper_map_prg_ram_addr then mapper_map_prg_ram_addr(addr) else nil
-end
-
-local function prg_ram_read_enabled(): boolean
-	return if mapper_prg_ram_readable then mapper_prg_ram_readable() else true
-end
-
-local function prg_ram_write_enabled(): boolean
-	return if mapper_prg_ram_writable then mapper_prg_ram_writable() else true
-end
-
 local function bus_read(addr)
-	cpu_bus_tick()
+	if cpu_instruction_active and not in_dma_transfer then
+		cpu_bus_cycles += 1
+		cpu_pending_cycles += 1
+	end
 
-	addr = bit32.band(addr, 0xFFFF)
+	if addr >= 0x10000 or addr < 0 then
+		addr = bit32.band(addr, 0xFFFF)
+	end
 
 	if addr < 0x2000 then
 		local value = buffer.readu8(ram, bit32.band(addr, 0x07FF))
+		open_bus = value
+		return value
+	end
+
+	if addr >= 0x8000 then
+		local value = 0
+		if mapper_has_map_prg_addr and prg_rom_len > 0 then
+			local offset = mapper_map_prg_addr(addr)
+			if offset >= 0 and offset < prg_rom_len then
+				value = buffer.readu8(prg_rom, offset)
+			end
+		end
+		if mapper_is_mmc5 and addr <= 0xBFFF then
+			apu_on_mmc5_cpu_read(addr, value)
+		end
 		open_bus = value
 		return value
 	end
@@ -1134,7 +1242,7 @@ local function bus_read(addr)
 		return open_bus
 	end
 
-	if mapper_id == 5 and (addr == 0x5010 or addr == 0x5015) then
+	if mapper_is_mmc5 and (addr == 0x5010 or addr == 0x5015) then
 		flush_cpu_timing(true)
 		local value = bit32.band(apu_read_mmc5(addr), 0xFF)
 		open_bus = value
@@ -1143,7 +1251,7 @@ local function bus_read(addr)
 
 	if addr < 0x6000 then
 		flush_cpu_timing(false)
-		if mapper_read_cpu then
+		if mapper_has_read_cpu then
 			local mapper_value = mapper_read_cpu(addr)
 			if mapper_value then
 				local value = bit32.band(mapper_value, 0xFF)
@@ -1154,27 +1262,18 @@ local function bus_read(addr)
 		return open_bus
 	end
 
-	local ram_addr = resolve_prg_ram_addr(addr)
-	if ram_addr then
-		if ram_addr < 0 or ram_addr >= prg_ram_len or (not prg_ram_read_enabled()) then
-			return open_bus
-		end
+	if mapper_has_map_prg_ram_addr then
+		local ram_addr = mapper_map_prg_ram_addr(addr)
+		if ram_addr then
+			local readable = if mapper_has_prg_ram_readable then mapper_prg_ram_readable() else true
+			if ram_addr < 0 or ram_addr >= prg_ram_len or (not readable) then
+				return open_bus
+			end
 
-		local value = buffer.readu8(prg_ram, ram_addr)
-		if mapper_id == 5 and addr >= 0x8000 and addr <= 0xBFFF then
-			apu_on_mmc5_cpu_read(addr, value)
+			local value = buffer.readu8(prg_ram, ram_addr)
+			open_bus = value
+			return value
 		end
-		open_bus = value
-		return value
-	end
-
-	if addr >= 0x8000 then
-		local value = bit32.band(prg_read(addr), 0xFF)
-		if mapper_id == 5 and addr <= 0xBFFF then
-			apu_on_mmc5_cpu_read(addr, value)
-		end
-		open_bus = value
-		return value
 	end
 
 	return open_bus
@@ -1195,9 +1294,14 @@ local function oam_dma(page: number)
 end
 
 local function bus_write(addr: number, value: number)
-	cpu_bus_tick()
+	if cpu_instruction_active and not in_dma_transfer then
+		cpu_bus_cycles += 1
+		cpu_pending_cycles += 1
+	end
 
-	addr = bit32.band(addr, 0xFFFF)
+	if addr >= 0x10000 or addr < 0 then
+		addr = bit32.band(addr, 0xFFFF)
+	end
 	value = bit32.band(value, 0xFF)
 	open_bus = value
 
@@ -1212,6 +1316,21 @@ local function bus_write(addr: number, value: number)
 		return
 	end
 
+	if addr >= 0x8000 then
+		flush_cpu_timing(false)
+		if mapper_has_write_cpu then
+			mapper_write_cpu(addr, value)
+			if mapper_has_get_mirroring then
+				local mapper_mirroring = mapper_get_mirroring()
+				if mapper_mirroring ~= mirroring_mode then
+					mirroring_mode = mapper_mirroring
+					refresh_nametable_lut()
+				end
+			end
+		end
+		return
+	end
+
 	if addr == 0x4014 then
 		flush_cpu_timing(false)
 		oam_dma(value)
@@ -1220,7 +1339,10 @@ local function bus_write(addr: number, value: number)
 
 	if addr == 0x4016 then
 		flush_cpu_timing(false)
-		strobe(value)
+		pad_strobe = bit32.band(value, 0x01)
+		if pad_strobe == 1 then
+			buffer.writeu16(pad_index, 0, 0)
+		end
 		return
 	end
 
@@ -1243,28 +1365,35 @@ local function bus_write(addr: number, value: number)
 	end
 
 	if addr < 0x6000 then
-		if mapper_id == 5 and addr >= 0x5000 and addr <= 0x5015 then
+		if mapper_is_mmc5 and addr >= 0x5000 and addr <= 0x5015 then
 			flush_cpu_timing(true)
 			apu_write_mmc5(addr, value)
 			return
 		end
 		flush_cpu_timing(false)
-		mapper_write(addr, value)
+		if mapper_has_write_cpu then
+			mapper_write_cpu(addr, value)
+			if mapper_has_get_mirroring then
+				local mapper_mirroring = mapper_get_mirroring()
+				if mapper_mirroring ~= mirroring_mode then
+					mirroring_mode = mapper_mirroring
+					refresh_nametable_lut()
+				end
+			end
+		end
 		return
 	end
 
-	local ram_addr = resolve_prg_ram_addr(addr)
-	if ram_addr then
-		if ram_addr < 0 or ram_addr >= prg_ram_len or (not prg_ram_write_enabled()) then
+	if mapper_has_map_prg_ram_addr then
+		local ram_addr = mapper_map_prg_ram_addr(addr)
+		if ram_addr then
+			local writable = if mapper_has_prg_ram_writable then mapper_prg_ram_writable() else true
+			if ram_addr < 0 or ram_addr >= prg_ram_len or (not writable) then
+				return
+			end
+			buffer.writeu8(prg_ram, ram_addr, value)
 			return
 		end
-		buffer.writeu8(prg_ram, ram_addr, value)
-		return
-	end
-
-	if addr >= 0x8000 then
-		flush_cpu_timing(false)
-		mapper_write(addr, value)
 	end
 end
 
@@ -1274,28 +1403,12 @@ local function read16(addr)
 	return bit32.bor(lo, bit32.lshift(hi, 8))
 end
 
-local function read16_wrap(addr)
-	local lo = bus_read(addr)
-	local hi = bus_read(bit32.band(addr, 0xFF00) + bit32.band(addr + 1, 0x00FF))
-	return bit32.bor(lo, bit32.lshift(hi, 8))
-end
-
 local function set_flag(flag, cond)
 	if cond then
 		status = bit32.bor(status, flag)
 	else
-		status = bit32.band(status, bit32.bxor(0xFF, flag))
+		status = bit32.band(status, bit32.bnot(flag))
 	end
-end
-
-local function push(value)
-	bus_write(0x0100 + sp, value)
-	sp = bit32.band(sp - 1, 0xFF)
-end
-
-local function pull()
-	sp = bit32.band(sp + 1, 0xFF)
-	return bus_read(0x0100 + sp)
 end
 
 local indexed_dummy_always = buffer.create(256)
@@ -1305,73 +1418,99 @@ local opcode_execute = table.create(256)
 local function opcodes_init()
 	local function set_zn(value)
 		value = bit32.band(value, 0xFF)
-		set_flag(2, value == 0)
-		set_flag(128, bit32.btest(value, 0x80))
+		local zn = bit32.band(value, 0x80)
+		if value == 0 then
+			zn = bit32.bor(zn, 0x02)
+		end
+		status = bit32.bor(bit32.band(status, 0x7D), zn)
 		return value
 	end
 
 	local function imp() end
 	local function acc() end
 
-	local function calc_indexed_addr(base: number, index: number): (number, number, boolean)
-		local low_sum = bit32.band(base, 0xFF) + index
-		local final_addr = bit32.band(base + index, 0xFFFF)
-		local dummy_addr = bit32.bor(
-			bit32.band(base, 0xFF00),
-			bit32.band(low_sum, 0x00FF)
-		)
-		return final_addr, dummy_addr, low_sum > 0xFF
-	end
-
 	local function imm()
 		addr_value = pc
-		pc = bit32.band(pc + 1, 0xFFFF)
+		pc += 1
+		if pc == 0x10000 then
+			pc = 0
+		end
 	end
 
 	local function zp()
 		addr_value = bus_read(pc)
-		pc = bit32.band(pc + 1, 0xFFFF)
+		pc += 1
+		if pc == 0x10000 then
+			pc = 0
+		end
 	end
 
 	local function zpx()
 		addr_value = bit32.band(bus_read(pc) + x, 0xFF)
-		pc = bit32.band(pc + 1, 0xFFFF)
+		pc += 1
+		if pc == 0x10000 then
+			pc = 0
+		end
 	end
 
 	local function zpy()
 		addr_value = bit32.band(bus_read(pc) + y, 0xFF)
-		pc = bit32.band(pc + 1, 0xFFFF)
+		pc += 1
+		if pc == 0x10000 then
+			pc = 0
+		end
 	end
 
 	local function abs()
-		addr_value = read16(pc)
-		pc = bit32.band(pc + 2, 0xFFFF)
+		local lo = bus_read(pc)
+		local hi = bus_read(pc + 1)
+		addr_value = bit32.bor(lo, bit32.lshift(hi, 8))
+		pc += 2
+		if pc >= 0x10000 then
+			pc -= 0x10000
+		end
 	end
 
 	local function abx()
-		local base = read16(pc)
-		local final_addr, dummy_addr, crossed = calc_indexed_addr(base, x)
-		addr_value = final_addr
-		page_crossed = crossed
-		indexed_dummy_addr = dummy_addr
-		indexed_dummy_valid = true
-		pc = bit32.band(pc + 2, 0xFFFF)
+		local lo = bus_read(pc)
+		local hi = bus_read(pc + 1)
+		local base = bit32.bor(lo, bit32.lshift(hi, 8))
+		local low_sum = bit32.band(base, 0xFF) + x
+		addr_value = bit32.band(base + x, 0xFFFF)
+		page_crossed = low_sum > 0xFF
+		indexed_dummy_addr = bit32.bor(bit32.band(base, 0xFF00), bit32.band(low_sum, 0x00FF))
+		pc += 2
+		if pc >= 0x10000 then
+			pc -= 0x10000
+		end
 	end
 
 	local function aby()
-		local base = read16(pc)
-		local final_addr, dummy_addr, crossed = calc_indexed_addr(base, y)
-		addr_value = final_addr
-		page_crossed = crossed
-		indexed_dummy_addr = dummy_addr
-		indexed_dummy_valid = true
-		pc = bit32.band(pc + 2, 0xFFFF)
+		local lo = bus_read(pc)
+		local hi = bus_read(pc + 1)
+		local base = bit32.bor(lo, bit32.lshift(hi, 8))
+		local low_sum = bit32.band(base, 0xFF) + y
+		addr_value = bit32.band(base + y, 0xFFFF)
+		page_crossed = low_sum > 0xFF
+		indexed_dummy_addr = bit32.bor(bit32.band(base, 0xFF00), bit32.band(low_sum, 0x00FF))
+		pc += 2
+		if pc >= 0x10000 then
+			pc -= 0x10000
+		end
 	end
 
 	local function ind()
-		local ptr = read16(pc)
-		addr_value = read16_wrap(ptr)
-		pc = bit32.band(pc + 2, 0xFFFF)
+		local ptr_lo = bus_read(pc)
+		local ptr_hi = bus_read(pc + 1)
+		local ptr = bit32.bor(ptr_lo, bit32.lshift(ptr_hi, 8))
+
+		local lo = bus_read(ptr)
+		local hi = bus_read(bit32.bor(bit32.band(ptr, 0xFF00), bit32.band(ptr + 1, 0x00FF)))
+		addr_value = bit32.bor(lo, bit32.lshift(hi, 8))
+		pc += 2
+		if pc >= 0x10000 then
+			pc -= 0x10000
+		end
 	end
 
 	local function izx()
@@ -1379,7 +1518,10 @@ local function opcodes_init()
 		local lo = bus_read(base)
 		local hi = bus_read(bit32.band(base + 1, 0xFF))
 		addr_value = bit32.bor(lo, bit32.lshift(hi, 8))
-		pc = bit32.band(pc + 1, 0xFFFF)
+		pc += 1
+		if pc == 0x10000 then
+			pc = 0
+		end
 	end
 
 	local function izy()
@@ -1387,47 +1529,52 @@ local function opcodes_init()
 		local lo = bus_read(base)
 		local hi = bus_read(bit32.band(base + 1, 0xFF))
 		local addr = bit32.bor(lo, bit32.lshift(hi, 8))
-		local final_addr, dummy_addr, crossed = calc_indexed_addr(addr, y)
-		addr_value = final_addr
-		page_crossed = crossed
-		indexed_dummy_addr = dummy_addr
-		indexed_dummy_valid = true
-		pc = bit32.band(pc + 1, 0xFFFF)
+		local low_sum = bit32.band(addr, 0xFF) + y
+		addr_value = bit32.band(addr + y, 0xFFFF)
+		page_crossed = low_sum > 0xFF
+		indexed_dummy_addr = bit32.bor(bit32.band(addr, 0xFF00), bit32.band(low_sum, 0x00FF))
+		pc += 1
+		if pc == 0x10000 then
+			pc = 0
+		end
 	end
 
 	local function rel()
 		local offset = bus_read(pc)
-		pc = bit32.band(pc + 1, 0xFFFF)
+		pc += 1
+		if pc == 0x10000 then
+			pc = 0
+		end
 		if offset >= 128 then
 			offset = offset - 256
 		end
 		addr_value = bit32.band(pc + offset, 0xFFFF)
 	end
 
-	local function read_op()
-		return bus_read(addr_value)
-	end
-
-	local function write_op(v)
-		bus_write(addr_value, v)
-	end
-
 	local function write_op_rmw(old_value: number, new_value: number)
-		write_op(bit32.band(old_value, 0xFF))
-		write_op(bit32.band(new_value, 0xFF))
+		bus_write(addr_value, bit32.band(old_value, 0xFF))
+		bus_write(addr_value, bit32.band(new_value, 0xFF))
 	end
 
 	local function adc()
-		local m = read_op()
+		local m = bus_read(addr_value)
 		local c = bit32.btest(status, 1) and 1 or 0
 		local sum = a + m + c
-		set_flag(1, sum > 255)
-		set_flag(64, bit32.btest(bit32.band(bit32.bxor(a, sum), bit32.bxor(m, sum), 0x80), 0x80))
+		if sum > 255 then
+			status = bit32.bor(status, 0x01)
+		else
+			status = bit32.band(status, 0xFE)
+		end
+		if bit32.btest(bit32.band(bit32.bxor(a, sum), bit32.bxor(m, sum), 0x80), 0x80) then
+			status = bit32.bor(status, 0x40)
+		else
+			status = bit32.band(status, 0xBF)
+		end
 		a = set_zn(bit32.band(sum, 0xFF))
 	end
 
 	local function op_and()
-		a = set_zn(bit32.band(a, read_op()))
+		a = set_zn(bit32.band(a, bus_read(addr_value)))
 	end
 
 	local function asl_a()
@@ -1436,7 +1583,7 @@ local function opcodes_init()
 	end
 
 	local function asl()
-		local m = read_op()
+		local m = bus_read(addr_value)
 		set_flag(1, bit32.btest(m, 0x80))
 		local result = set_zn(bit32.band(bit32.lshift(m, 1), 0xFF))
 		write_op_rmw(m, result)
@@ -1459,7 +1606,7 @@ local function opcodes_init()
 	end
 
 	local function op_bit()
-		local m = read_op()
+		local m = bus_read(addr_value)
 		set_flag(2, bit32.band(a, m) == 0)
 		set_flag(64, bit32.btest(m, 0x40))
 		set_flag(128, bit32.btest(m, 0x80))
@@ -1467,35 +1614,52 @@ local function opcodes_init()
 
 	local function brk()
 		pc = bit32.band(pc + 1, 0xFFFF)
+		
+		bus_write(0x0100 + sp, bit32.rshift(pc, 8))
+		sp = bit32.band(sp - 1, 0xFF)
+		
+		bus_write(0x0100 + sp, bit32.band(pc, 0xFF))
+		sp = bit32.band(sp - 1, 0xFF)
+		
+		bus_write(0x0100 + sp, bit32.bor(status, 16, 32))
+		sp = bit32.band(sp - 1, 0xFF)
 
-		push(bit32.rshift(pc, 8))
-		push(bit32.band(pc, 0xFF))
-
-		push(bit32.bor(status, 16, 32))
 		set_flag(4, true)
 		pc = read16(0xFFFE)
 	end
 
 	local function cmp()
-		local m = read_op()
-		set_flag(1, a >= m)
+		local m = bus_read(addr_value)
+		if a >= m then
+			status = bit32.bor(status, 0x01)
+		else
+			status = bit32.band(status, 0xFE)
+		end
 		set_zn(bit32.band(a - m, 0xFF))
 	end
 
 	local function cpx()
-		local m = read_op()
-		set_flag(1, x >= m)
+		local m = bus_read(addr_value)
+		if x >= m then
+			status = bit32.bor(status, 0x01)
+		else
+			status = bit32.band(status, 0xFE)
+		end
 		set_zn(bit32.band(x - m, 0xFF))
 	end
 
 	local function cpy()
-		local m = read_op()
-		set_flag(1, y >= m)
+		local m = bus_read(addr_value)
+		if y >= m then
+			status = bit32.bor(status, 0x01)
+		else
+			status = bit32.band(status, 0xFE)
+		end
 		set_zn(bit32.band(y - m, 0xFF))
 	end
 
 	local function dec()
-		local m = read_op()
+		local m = bus_read(addr_value)
 		local result = set_zn(bit32.band(m - 1, 0xFF))
 		write_op_rmw(m, result)
 	end
@@ -1509,11 +1673,11 @@ local function opcodes_init()
 	end
 
 	local function eor()
-		a = set_zn(bit32.bxor(a, read_op()))
+		a = set_zn(bit32.bxor(a, bus_read(addr_value)))
 	end
 
 	local function inc()
-		local m = read_op()
+		local m = bus_read(addr_value)
 		local result = set_zn(bit32.band(m + 1, 0xFF))
 		write_op_rmw(m, result)
 	end
@@ -1533,22 +1697,25 @@ local function opcodes_init()
 	local function jsr()
 		local value = bit32.band(pc - 1, 0xFFFF)
 
-		push(bit32.rshift(value, 8))
-		push(bit32.band(value, 0xFF))
+		bus_write(0x0100 + sp, bit32.rshift(value, 8))
+		sp = bit32.band(sp - 1, 0xFF)
+		
+		bus_write(0x0100 + sp, bit32.band(value, 0xFF))
+		sp = bit32.band(sp - 1, 0xFF)
 
 		pc = addr_value
 	end
 
 	local function lda()
-		a = set_zn(read_op())
+		a = set_zn(bus_read(addr_value))
 	end
 
 	local function ldx()
-		x = set_zn(read_op())
+		x = set_zn(bus_read(addr_value))
 	end
 
 	local function ldy()
-		y = set_zn(read_op())
+		y = set_zn(bus_read(addr_value))
 	end
 
 	local function lsr_a()
@@ -1557,30 +1724,34 @@ local function opcodes_init()
 	end
 
 	local function lsr()
-		local m = read_op()
+		local m = bus_read(addr_value)
 		set_flag(1, bit32.btest(m, 0x01))
 		local result = set_zn(bit32.rshift(m, 1))
 		write_op_rmw(m, result)
 	end
 
 	local function ora()
-		a = set_zn(bit32.bor(a, read_op()))
+		a = set_zn(bit32.bor(a, bus_read(addr_value)))
 	end
 
 	local function pha()
-		push(a)
+		bus_write(0x0100 + sp, a)
+		sp = bit32.band(sp - 1, 0xFF)
 	end
 
 	local function php()
-		push(bit32.bor(status, 16, 32))
+		bus_write(0x0100 + sp, bit32.bor(status, 16, 32))
+		sp = bit32.band(sp - 1, 0xFF)
 	end
 
 	local function pla()
-		a = set_zn(pull())
+		sp = bit32.band(sp + 1, 0xFF)
+		a = set_zn(bus_read(0x0100 + sp))
 	end
 
 	local function plp()
-		status = bit32.bor(bit32.band(pull(), 0xEF), 32)
+		sp = bit32.band(sp + 1, 0xFF)
+		status = bit32.bor(bit32.band(bus_read(0x0100 + sp), 0xEF), 32)
 	end
 
 	local function rol_a()
@@ -1590,7 +1761,7 @@ local function opcodes_init()
 	end
 
 	local function rol()
-		local m = read_op()
+		local m = bus_read(addr_value)
 		local c = bit32.btest(status, 1) and 1 or 0
 		set_flag(1, bit32.btest(m, 0x80))
 		local result = set_zn(bit32.band(bit32.bor(bit32.lshift(m, 1), c), 0xFF))
@@ -1604,7 +1775,7 @@ local function opcodes_init()
 	end
 
 	local function ror()
-		local m = read_op()
+		local m = bus_read(addr_value)
 		local c = bit32.btest(status, 1) and 0x80 or 0
 		set_flag(1, bit32.btest(m, 0x01))
 		local result = set_zn(bit32.bor(bit32.rshift(m, 1), c))
@@ -1612,33 +1783,48 @@ local function opcodes_init()
 	end
 
 	local function rti()
-		status = bit32.bor(bit32.band(pull(), 0xEF), 32)
-		pc = bit32.bor(pull(), bit32.lshift(pull(), 8))
+		sp = bit32.band(sp + 1, 0xFF)
+		status = bit32.bor(bit32.band(bus_read(0x0100 + sp), 0xEF), 32)
+		sp = bit32.band(sp + 1, 0xFF)
+		local pulled = bus_read(0x0100 + sp)
+		sp = bit32.band(sp + 1, 0xFF)
+		pc = bit32.bor(pulled, bit32.lshift(bus_read(0x0100 + sp), 8))
 	end
 
 	local function rts()
-		pc = bit32.band(bit32.bor(pull(), bit32.lshift(pull(), 8)) + 1, 0xFFFF)
+		sp = bit32.band(sp + 1, 0xFF)
+		local pulled = bus_read(0x0100 + sp)
+		sp = bit32.band(sp + 1, 0xFF)
+		pc = bit32.band(bit32.bor(pulled, bit32.lshift(bus_read(0x0100 + sp), 8)) + 1, 0xFFFF)
 	end
 
 	local function sbc()
-		local m = read_op()
+		local m = bus_read(addr_value)
 		local c = bit32.btest(status, 1) and 0 or 1
 		local diff = a - m - c
-		set_flag(1, diff >= 0)
-		set_flag(64, bit32.btest(bit32.band(bit32.bxor(a, diff), bit32.bxor(a, m), 0x80), 0x80))
+		if diff >= 0 then
+			status = bit32.bor(status, 0x01)
+		else
+			status = bit32.band(status, 0xFE)
+		end
+		if bit32.btest(bit32.band(bit32.bxor(a, diff), bit32.bxor(a, m), 0x80), 0x80) then
+			status = bit32.bor(status, 0x40)
+		else
+			status = bit32.band(status, 0xBF)
+		end
 		a = set_zn(bit32.band(diff, 0xFF))
 	end
 
 	local function sta()
-		write_op(a)
+		bus_write(addr_value, a)
 	end
 
 	local function stx()
-		write_op(x)
+		bus_write(addr_value, x)
 	end
 
 	local function sty()
-		write_op(y)
+		bus_write(addr_value, y)
 	end
 
 	local function tax()
@@ -1668,31 +1854,47 @@ local function opcodes_init()
 	local function add_with_carry(m: number)
 		local c = bit32.btest(status, 1) and 1 or 0
 		local sum = a + m + c
-		set_flag(1, sum > 255)
-		set_flag(64, bit32.btest(bit32.band(bit32.bxor(a, sum), bit32.bxor(m, sum), 0x80), 0x80))
+		if sum > 255 then
+			status = bit32.bor(status, 0x01)
+		else
+			status = bit32.band(status, 0xFE)
+		end
+		if bit32.btest(bit32.band(bit32.bxor(a, sum), bit32.bxor(m, sum), 0x80), 0x80) then
+			status = bit32.bor(status, 0x40)
+		else
+			status = bit32.band(status, 0xBF)
+		end
 		a = set_zn(bit32.band(sum, 0xFF))
 	end
 
 	local function sub_with_borrow(m: number)
 		local c = bit32.btest(status, 1) and 0 or 1
 		local diff = a - m - c
-		set_flag(1, diff >= 0)
-		set_flag(64, bit32.btest(bit32.band(bit32.bxor(a, diff), bit32.bxor(a, m), 0x80), 0x80))
+		if diff >= 0 then
+			status = bit32.bor(status, 0x01)
+		else
+			status = bit32.band(status, 0xFE)
+		end
+		if bit32.btest(bit32.band(bit32.bxor(a, diff), bit32.bxor(a, m), 0x80), 0x80) then
+			status = bit32.bor(status, 0x40)
+		else
+			status = bit32.band(status, 0xBF)
+		end
 		a = set_zn(bit32.band(diff, 0xFF))
 	end
 
 	local function op_lax()
-		local m = read_op()
+		local m = bus_read(addr_value)
 		a = set_zn(m)
 		x = a
 	end
 
 	local function op_sax()
-		write_op(bit32.band(a, x))
+		bus_write(addr_value, bit32.band(a, x))
 	end
 
 	local function op_dcp()
-		local old_m = read_op()
+		local old_m = bus_read(addr_value)
 		local m = bit32.band(old_m - 1, 0xFF)
 		write_op_rmw(old_m, m)
 		set_flag(1, a >= m)
@@ -1700,14 +1902,14 @@ local function opcodes_init()
 	end
 
 	local function op_isc()
-		local old_m = read_op()
+		local old_m = bus_read(addr_value)
 		local m = bit32.band(old_m + 1, 0xFF)
 		write_op_rmw(old_m, m)
 		sub_with_borrow(m)
 	end
 
 	local function op_rla()
-		local old_m = read_op()
+		local old_m = bus_read(addr_value)
 		local c = bit32.btest(status, 1) and 1 or 0
 		set_flag(1, bit32.btest(old_m, 0x80))
 		local m = bit32.band(bit32.bor(bit32.lshift(old_m, 1), c), 0xFF)
@@ -1716,7 +1918,7 @@ local function opcodes_init()
 	end
 
 	local function op_rra()
-		local old_m = read_op()
+		local old_m = bus_read(addr_value)
 		local c = bit32.btest(status, 1) and 0x80 or 0
 		set_flag(1, bit32.btest(old_m, 0x01))
 		local m = bit32.band(bit32.bor(bit32.rshift(old_m, 1), c), 0xFF)
@@ -1725,7 +1927,7 @@ local function opcodes_init()
 	end
 
 	local function op_slo()
-		local old_m = read_op()
+		local old_m = bus_read(addr_value)
 		set_flag(1, bit32.btest(old_m, 0x80))
 		local m = bit32.band(bit32.lshift(old_m, 1), 0xFF)
 		write_op_rmw(old_m, m)
@@ -1733,7 +1935,7 @@ local function opcodes_init()
 	end
 
 	local function op_sre()
-		local old_m = read_op()
+		local old_m = bus_read(addr_value)
 		set_flag(1, bit32.btest(old_m, 0x01))
 		local m = bit32.rshift(old_m, 1)
 		write_op_rmw(old_m, m)
@@ -1741,18 +1943,18 @@ local function opcodes_init()
 	end
 
 	local function op_anc()
-		a = set_zn(bit32.band(a, read_op()))
+		a = set_zn(bit32.band(a, bus_read(addr_value)))
 		set_flag(1, bit32.btest(a, 0x80))
 	end
 
 	local function op_alr()
-		a = bit32.band(a, read_op())
+		a = bit32.band(a, bus_read(addr_value))
 		set_flag(1, bit32.btest(a, 0x01))
 		a = set_zn(bit32.rshift(a, 1))
 	end
 
 	local function op_arr()
-		a = bit32.band(a, read_op())
+		a = bit32.band(a, bus_read(addr_value))
 		a = bit32.band(bit32.bor(bit32.rshift(a, 1), (bit32.btest(status, 1) and 0x80 or 0)), 0xFF)
 		a = set_zn(a)
 		set_flag(1, bit32.btest(a, 0x40))
@@ -1762,13 +1964,13 @@ local function opcodes_init()
 	end
 
 	local function op_sbx()
-		local t = bit32.band(a, x) - read_op()
+		local t = bit32.band(a, x) - bus_read(addr_value)
 		set_flag(1, t >= 0)
 		x = set_zn(bit32.band(t, 0xFF))
 	end
 
 	local function op_las()
-		local m = bit32.band(read_op(), sp)
+		local m = bit32.band(bus_read(addr_value), sp)
 		a = m
 		x = m
 		sp = m
@@ -1776,36 +1978,36 @@ local function opcodes_init()
 	end
 
 	local function op_xaa()
-		a = set_zn(bit32.band(bit32.bor(a, 0xEE), x, read_op()))
+		a = set_zn(bit32.band(bit32.bor(a, 0xEE), x, bus_read(addr_value)))
 	end
 
 	local function op_lxa()
-		local v = read_op()
+		local v = bus_read(addr_value)
 		a = set_zn(v)
 		x = a
 	end
 
 	local function op_ahx()
-		write_op(bit32.band(a, x, bit32.band(bit32.rshift(addr_value, 8) + 1, 0xFF)))
+		bus_write(addr_value, bit32.band(a, x, bit32.band(bit32.rshift(addr_value, 8) + 1, 0xFF)))
 	end
 
 	local function op_tas()
 		sp = bit32.band(a, x)
 		local high_plus_one = bit32.band(bit32.rshift(addr_value, 8) + 1, 0xFF)
-		write_op(bit32.band(sp, high_plus_one))
+		bus_write(addr_value, bit32.band(sp, high_plus_one))
 	end
 
 	local function op_shy()
 		local value = bit32.band(y, bit32.band(bit32.rshift(addr_value, 8) + 1, 0xFF))
 		addr_value = bit32.bor(bit32.lshift(value, 8), bit32.band(addr_value, 0xFF))
-		write_op(value)
+		bus_write(addr_value, value)
 	end
 
 	local function op_shx()
 		local high_plus_one = bit32.band(bit32.rshift(addr_value, 8) + 1, 0xFF)
 		local value = bit32.band(x, high_plus_one)
 		addr_value = bit32.bor(bit32.lshift(value, 8), bit32.band(addr_value, 0xFF))
-		write_op(value)
+		bus_write(addr_value, value)
 	end
 
 	local function op_jam()
@@ -1814,7 +2016,7 @@ local function opcodes_init()
 	end
 
 	local function op_nop_read()
-		read_op()
+		bus_read(addr_value)
 	end
 
 	local function ill()
@@ -2040,15 +2242,10 @@ local function opcodes_init()
 		if always_dummy_read then
 			if has_page_cross_penalty then
 				opcode_execute[opcode] = function()
-					page_crossed = false
-					indexed_dummy_valid = false
-					indexed_dummy_addr = 0
 					cycles = base_cycles
 
 					addr_exec()
-					if indexed_dummy_valid then
-						bus_read(indexed_dummy_addr)
-					end
+					bus_read(indexed_dummy_addr)
 
 					op_exec()
 
@@ -2058,28 +2255,20 @@ local function opcodes_init()
 				end
 			else
 				opcode_execute[opcode] = function()
-					page_crossed = false
-					indexed_dummy_valid = false
-					indexed_dummy_addr = 0
 					cycles = base_cycles
 
 					addr_exec()
-					if indexed_dummy_valid then
-						bus_read(indexed_dummy_addr)
-					end
+					bus_read(indexed_dummy_addr)
 
 					op_exec()
 				end
 			end
 		elseif has_page_cross_penalty then
 			opcode_execute[opcode] = function()
-				page_crossed = false
-				indexed_dummy_valid = false
-				indexed_dummy_addr = 0
 				cycles = base_cycles
 
 				addr_exec()
-				if indexed_dummy_valid and page_crossed then
+				if page_crossed then
 					bus_read(indexed_dummy_addr)
 				end
 
@@ -2091,9 +2280,6 @@ local function opcodes_init()
 			end
 		else
 			opcode_execute[opcode] = function()
-				page_crossed = false
-				indexed_dummy_valid = false
-				indexed_dummy_addr = 0
 				cycles = base_cycles
 
 				addr_exec()
@@ -2132,7 +2318,6 @@ local function reset()
 	frame_ready = false
 	pad_strobe = 0
 	odd_frame = false
-	frame_index = 0
 	mmc3_a12_sampled = false
 	in_ppu_step = false
 	cpu_instruction_active = false
@@ -2153,11 +2338,8 @@ local function reset()
 	fine_x = 0
 	oam_addr = 0
 	buffer.fill(pad_index, 0, 0, 2)
-	buffer.fill(bg_data, 0, 0, FRAME_WIDTH)
 	sprite_scanline_generation = 1
-	buffer.fill(sprite_scanline_stamp, 0, 0, FRAME_WIDTH)
-	buffer.fill(sprite_scanline_color, 0, 0, FRAME_WIDTH)
-	buffer.fill(sprite_scanline_meta, 0, 0, FRAME_WIDTH)
+	buffer.fill(sprite_scanline_data, 0, 0, FRAME_WIDTH * 4)
 	buffer.fill(sprite_x, 0, 0, 8)
 	buffer.fill(sprite_low, 0, 0, 8)
 	buffer.fill(sprite_high, 0, 0, 8)
@@ -2170,31 +2352,42 @@ local function reset()
 
 	if mapper then
 		mapper.reset()
-		if mapper_get_mirroring then
+		if mapper_has_get_mirroring then
 			mirroring_mode = mapper_get_mirroring()
 		end
+		refresh_nametable_lut()
 	end
 
 	apu_reset()
-	apu_set_mmc5_enabled(mapper_id == 5)
+	apu_set_mmc5_enabled(mapper_is_mmc5)
 	pc = read16(0xFFFC)
 end
 
 local function nmi(): number
-	push(bit32.rshift(pc, 8))
-	push(bit32.band(pc, 0xFF))
+	bus_write(0x0100 + sp, bit32.rshift(pc, 8))
+	sp = bit32.band(sp - 1, 0xFF)
+	
+	bus_write(0x0100 + sp, bit32.band(pc, 0xFF))
+	sp = bit32.band(sp - 1, 0xFF)
 
-	push(bit32.bor(bit32.band(status, 0xEF), 0x20))
+	bus_write(0x0100 + sp, bit32.bor(bit32.band(status, 0xEF), 0x20))
+	sp = bit32.band(sp - 1, 0xFF)
+	
 	set_flag(4, true)
 	pc = read16(0xFFFA)
 	return 7
 end
 
 local function irq(): number
-	push(bit32.rshift(pc, 8))
-	push(bit32.band(pc, 0xFF))
-
-	push(bit32.bor(bit32.band(status, 0xEF), 0x20))
+	bus_write(0x0100 + sp, bit32.rshift(pc, 8))
+	sp = bit32.band(sp - 1, 0xFF)
+	
+	bus_write(0x0100 + sp, bit32.band(pc, 0xFF))
+	sp = bit32.band(sp - 1, 0xFF)
+	
+	bus_write(0x0100 + sp, bit32.bor(bit32.band(status, 0xEF), 0x20))
+	sp = bit32.band(sp - 1, 0xFF)
+	
 	set_flag(4, true)
 	pc = read16(0xFFFE)
 	return 7
@@ -2209,7 +2402,10 @@ local function step()
 	end
 
 	local opcode = bus_read(pc)
-	pc = bit32.band(pc + 1, 0xFFFF)
+	pc += 1
+	if pc == 0x10000 then
+		pc = 0
+	end
 	opcode_execute[opcode]()
 
 	cycles += dma_cycles
@@ -2233,8 +2429,8 @@ local function load(data: string)
 
 	assert(h1 == 0x4E and h2 == 0x45 and h3 == 0x53 and h4 == 0x1A, "Invalid iNES header")
 
-	prg_banks = buffer.readu8(rom, 4)
-	chr_banks = buffer.readu8(rom, 5)
+	local prg_banks = buffer.readu8(rom, 4)
+	local chr_banks = buffer.readu8(rom, 5)
 
 	local flags6 = buffer.readu8(rom, 6)
 	local flags7 = buffer.readu8(rom, 7)
@@ -2246,8 +2442,11 @@ local function load(data: string)
 	local flags13 = buffer.readu8(rom, 13)
 	local flags14 = buffer.readu8(rom, 14)
 	local flags15 = buffer.readu8(rom, 15)
+	
 	local header_padding_is_zero = flags12 == 0 and flags13 == 0 and flags14 == 0 and flags15 == 0
+	
 	local is_ines2 = bit32.band(flags7, 0x0C) == 0x08
+	local submapper: number? = nil
 
 	local mapper_lower_nibble = bit32.rshift(bit32.band(flags6, 0xF0), 4)
 	local mapper_upper_nibble = bit32.band(flags7, 0xF0)
@@ -2262,6 +2461,7 @@ local function load(data: string)
 	end
 	if is_ines2 then
 		mapper_number = bit32.bor(mapper_number, bit32.lshift(bit32.band(flags8, 0x0F), 8))
+		submapper = bit32.rshift(flags8, 4)
 	end
 
 	if is_ines2 then
@@ -2276,7 +2476,8 @@ local function load(data: string)
 		chr_banks = bit32.bor(chr_banks, bit32.lshift(chr_msb, 8))
 	end
 
-	mapper_id = mapper_number
+	local mapper_id = mapper_number
+	mapper_is_mmc5 = mapper_id == 5
 	assert(Mappers.supports(mapper_id), string.format("Unsupported mapper: %d", mapper_id))
 
 	four_screen_mode = bit32.btest(flags6, 0x08)
@@ -2285,6 +2486,7 @@ local function load(data: string)
 	else
 		mirroring_mode = bit32.band(flags6, 0x01) == 0 and 3 or 2
 	end
+	refresh_nametable_lut()
 
 	local has_trainer = bit32.btest(flags6, 0x04)
 	local has_battery = bit32.btest(flags6, 0x02)
@@ -2373,12 +2575,14 @@ local function load(data: string)
 		chrIsRam = chr_is_ram,
 		prgRamSize = prg_ram_size,
 		hasBattery = has_battery,
+		submapper = submapper,
 		vram = vram,
 	})
 
 	bind_mapper(created_mapper)
-	if mapper_get_mirroring then
+	if mapper_has_get_mirroring then
 		mirroring_mode = mapper_get_mirroring()
+		refresh_nametable_lut()
 	end
 
 	buffer.fill(prg_ram, 0, 0, prg_ram_len)
@@ -2388,7 +2592,19 @@ local function load(data: string)
 	buffer.fill(palette, 0, 0, PALETTE_SIZE)
 
 	for i = 0, PALETTE_SIZE - 1 do
-		sync_palette_cache(i)
+		local base_color_index = bit32.band(buffer.readu8(palette, i), 0x3F)
+
+		buffer.writeu32(
+			palette_rgba32,
+			i * 4,
+			buffer.readu32(nes_rgba32, base_color_index * 4)
+		)
+
+		buffer.writeu32(
+			palette_rgba32,
+			(i + 32) * 4,
+			buffer.readu32(nes_rgba32, bit32.band(base_color_index, 0x30) * 4)
+		)
 	end
 
 	buffer.fill(framebuffer, 0, 0, FRAMEBUFFER_SIZE)
@@ -2415,7 +2631,6 @@ local function load(data: string)
 	frame_ready = false
 	pad_strobe = 0
 	odd_frame = false
-	frame_index = 0
 	mmc3_a12_sampled = false
 	in_ppu_step = false
 	cpu_instruction_active = false
@@ -2437,11 +2652,8 @@ local function load(data: string)
 	oam_addr = 0
 	buffer.fill(pad_state, 0, 0, 2)
 	buffer.fill(pad_index, 0, 0, 2)
-	buffer.fill(bg_data, 0, 0, FRAME_WIDTH)
 	sprite_scanline_generation = 1
-	buffer.fill(sprite_scanline_stamp, 0, 0, FRAME_WIDTH)
-	buffer.fill(sprite_scanline_color, 0, 0, FRAME_WIDTH)
-	buffer.fill(sprite_scanline_meta, 0, 0, FRAME_WIDTH)
+	buffer.fill(sprite_scanline_data, 0, 0, FRAME_WIDTH * 4)
 	buffer.fill(sprite_x, 0, 0, 8)
 	buffer.fill(sprite_low, 0, 0, 8)
 	buffer.fill(sprite_high, 0, 0, 8)
@@ -2453,7 +2665,7 @@ local function load(data: string)
 	reset_bg_pipeline()
 
 	apu_reset()
-	apu_set_mmc5_enabled(mapper_id == 5)
+	apu_set_mmc5_enabled(mapper_is_mmc5)
 	pc = read16(0xFFFC)
 end
 
@@ -2470,7 +2682,7 @@ return {
 				local nmi_cycles = nmi()
 				finalize_cpu_event(nmi_cycles)
 				nmi_pending_flag = false
-			elseif (apu_irq_pending() or mapper_irq_pending and mapper_irq_pending()) and not bit32.btest(status, 4) then
+			elseif not bit32.btest(status, 4) and (apu_irq_pending() or (mapper_has_irq_pending and mapper_irq_pending())) then
 				begin_cpu_event()
 				local irq_cycles = irq()
 				finalize_cpu_event(irq_cycles)
