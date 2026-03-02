@@ -48,7 +48,7 @@ export type Mapper = {
 	prgRamReadable: () -> boolean,
 	prgRamWritable: () -> boolean,
 }
- 
+
 --// BANKING HELPERS
 local function atLeastOne(value: number): number
 	return if value < 1 then 1 else value
