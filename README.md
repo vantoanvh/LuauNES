@@ -12,7 +12,7 @@ The audio files you can download in the [Sounds](https://github.com/vantoanvh/Lu
 
 > <h3>Disclamer</h3> Your device should have native code generation to make this run effectively.<br>This used <strong>EditableImage</strong> so you need ID Verification for this.
 
-This emulator currently supports:
+This emulator currently supports 16 mappers:
 
 - `Mapper 0` **NROM**
 - `Mapper 1` **MMC1**
