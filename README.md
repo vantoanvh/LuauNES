@@ -1,7 +1,7 @@
 # LuauNES
 **NES** emulator ported to roblox luau inspired/based on **[LuaNES](https://github.com/nico-abram/LuaNES)** by the original creator **[nico-abram](https://github.com/nico-abram)**<br><br>
 This is very performant and able to run **Kirby Adventure** with ~120 FPS ( 13th Gen Intel® Core™ i7-13620H )<br>
-also **Donkey Kong Classics** with 160-180 FPS.
+also **Donkey Kong Classics** with ~180 FPS.
 <br><br>
 But for low/mid-end devices, it gonna explodes. ( 20 FPS )
 <br>
