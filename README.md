@@ -3,9 +3,9 @@
 This is very performant and able to run **Kirby Adventure** with 90 - 110 FPS ( 13th Gen Intel® Core™ i7-13620H )<br>
 also **Donkey Kong Classics** with 160-180 FPS.
 <br><br>
-But for low/mid-end devices, it gonna explodes. ( 15 FPS )
+But for low/mid-end devices, it gonna explodes. ( 20 FPS )
 <br>
-Supports 2 player mode, sounds, PPU dot-based and, cycle-counted CPU.
+Supports 2 player mode, sounds, PPU dot-based and, cycle-accurate CPU.
 
 Moreover, you should upload your audio files as your own ( I cannot distrub the sounds because I am unverified )<br>
 The audio files you can download in the [Sounds](https://github.com/vantoanvh/LuauNES/tree/main/Sounds) folder<br>
