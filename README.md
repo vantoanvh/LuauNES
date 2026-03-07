@@ -1,4 +1,9 @@
 # LuauNES
+
+![Ver](https://img.shields.io/badge/version-v1.0.0-blue?style=plastic)
+[![License](https://img.shields.io/badge/license-MIT-97ca00?style=plastic)](https://github.com/vantoanvh/LuauParser/blob/main/LICENSE)
+[![Release](https://img.shields.io/badge/release-latest-darkblue?style=plastic)](https://github.com/vantoanvh/LuauNES/releases/latest)
+
 **NES** emulator ported to roblox luau inspired/based on **[LuaNES](https://github.com/nico-abram/LuaNES)** by the original creator **[nico-abram](https://github.com/nico-abram)**<br><br>
 This is very performant and able to run **Kirby Adventure** with ~120 FPS ( 13th Gen Intel® Core™ i7-13620H )<br>
 also **Donkey Kong Classics** with ~180 FPS.
