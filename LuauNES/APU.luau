@@ -11,13 +11,9 @@ local ASSETS = {
 	noise_mix = "rbxassetid://137650960613979",
 }
 
-type SoundAssetIds = {[string]: string}
-export type SoundAssetIdOverrides = {[string]: string | number}
-
-type DmcReader = (number) -> number
-
 export type APUInstance = {
 	step: (number) -> (),
+	syncMixer: () -> (),
 	readStatus: () -> number,
 	write: (number, number) -> (),
 	writeMmc5: (number, number) -> (),
@@ -29,9 +25,10 @@ export type APUInstance = {
 	consumeDmaStallCycles: () -> number,
 }
 
-return function (dmc_reader: DmcReader): APUInstance
+return function (dmc_reader: (number) -> number): APUInstance
 	local apu_frame_irq = false
 	local apu_dmc_irq = false
+	local mixer_dirty = false
 
 	-- narrow luau bridge optimization
 	local _, newindex = xpcall(function() game._____ = {} end, function() return debug.info(2, "f") end)
@@ -56,9 +53,13 @@ return function (dmc_reader: DmcReader): APUInstance
 		190, 160, 142, 128, 106, 85, 72, 54
 	}
 
-	local SOURCE_BASE_FREQUENCY_HZ = 441 -- must match manifest actual_base_frequency_hz
-	local PULSE_SPEED_NUM = CPU_CLOCK_HZ / (16 * SOURCE_BASE_FREQUENCY_HZ)
-	local TRIANGLE_SPEED_NUM = CPU_CLOCK_HZ / (32 * SOURCE_BASE_FREQUENCY_HZ)
+	local NOISE_PERIOD_TABLE = {
+		4, 8, 16, 32, 64, 96, 128, 160,
+		202, 254, 380, 508, 762, 1016, 2034, 4068
+	}
+
+	local PULSE_SPEED_NUM = CPU_CLOCK_HZ / (16 * 441)
+	local TRIANGLE_SPEED_NUM = CPU_CLOCK_HZ / (32 * 441)
 
 	local channel_enabled_mask = 0
 
@@ -137,13 +138,11 @@ return function (dmc_reader: DmcReader): APUInstance
 
 	local MASTER_SAMPLE_RATE = 44100
 	local REGION_GUARD_SAMPLES = 2048
-	local NOISE_PERIOD_TABLE = {
-		4, 8, 16, 32, 64, 96, 128, 160,
-		202, 254, 380, 508, 762, 1016, 2034, 4068
-	}
+
 	local NOISE_LONG_CYCLE_BITS = 32767
 	local NOISE_SHORT_CYCLE_BITS = 93
 	local NOISE_MIN_REGION_SECONDS = 0.10
+
 	local PULSE_ASSET_KEYS = {
 		"pulse_12_5",
 		"pulse_25",
@@ -227,6 +226,7 @@ return function (dmc_reader: DmcReader): APUInstance
 			bank[duty] = create_looped_sound(prefix .. "_" .. duty, PULSE_ASSET_KEYS[duty], nil)
 		end
 	end
+
 	local pulse1_duty1_sound = pulse_sound_bank[1][1]
 	local pulse1_duty2_sound = pulse_sound_bank[1][2]
 	local pulse1_duty3_sound = pulse_sound_bank[1][3]
@@ -235,6 +235,7 @@ return function (dmc_reader: DmcReader): APUInstance
 	local pulse2_duty2_sound = pulse_sound_bank[2][2]
 	local pulse2_duty3_sound = pulse_sound_bank[2][3]
 	local pulse2_duty4_sound = pulse_sound_bank[2][4]
+
 	local mmc5_pulse1_duty1_sound = mmc5_pulse_sound_bank[1][1]
 	local mmc5_pulse1_duty2_sound = mmc5_pulse_sound_bank[1][2]
 	local mmc5_pulse1_duty3_sound = mmc5_pulse_sound_bank[1][3]
@@ -417,7 +418,6 @@ return function (dmc_reader: DmcReader): APUInstance
 			noise_raw = if bit32.btest(noise_control, 0x10) then bit32.band(noise_control, 0x0F) else noise_envelope_decay
 		end
 
-		local dmc_raw = dmc_output_level
 		local mmc5_pulse1_raw = 0
 		local mmc5_pulse2_raw = 0
 
@@ -449,27 +449,17 @@ return function (dmc_reader: DmcReader): APUInstance
 
 		local triangle_term = triangle_raw / 8227
 		local noise_term = noise_raw / 12241
-		local dmc_term = dmc_raw / 22638
 
-		local tnd_total = triangle_term + noise_term + dmc_term
+		local tnd_total = triangle_term + noise_term + dmc_output_level / 22638
 		local tnd_mix = if tnd_total > 0 then 159.79 / ((1 / tnd_total) + 100) else 0
 
 		local triangle_gain = 0
 		local noise_gain = 0
-		local dmc_gain = 0
 
 		if tnd_mix > 0 and tnd_total > 0 then
 			triangle_gain = tnd_mix * (triangle_term / tnd_total)
-			noise_gain = tnd_mix * (noise_term / tnd_total)
-			dmc_gain = tnd_mix * (dmc_term / tnd_total)
+			noise_gain = tnd_mix * (noise_term / tnd_total) * 6.7 -- tuning this because noise is too quiet ( prevents weird moderation )
 		end
-
-		if dmc_bytes_remaining <= 0 and dmc_buffer_empty and dmc_silence then
-			dmc_gain = 0
-		end
-
-		noise_gain *= 6.7
-		dmc_gain *= 0.5
 
 		if pulse1_raw <= 0 then
 			set_sound_volume(pulse1_duty1_sound, 0)
@@ -477,20 +467,18 @@ return function (dmc_reader: DmcReader): APUInstance
 			set_sound_volume(pulse1_duty3_sound, 0)
 			set_sound_volume(pulse1_duty4_sound, 0)
 		else
-			local duty = bit32.band(bit32.rshift(pulse1_control, 6), 0x03) + 1
+			local duty = bit32.band(bit32.rshift(pulse1_control, 6), 0x03)
 			local speed = PULSE_SPEED_NUM / (pulse1_timer + 1)
-			local v1 = if duty == 1 then pulse1_gain else 0
-			local v2 = if duty == 2 then pulse1_gain else 0
-			local v3 = if duty == 3 then pulse1_gain else 0
-			local v4 = if duty == 4 then pulse1_gain else 0
+
 			set_sound_speed(pulse1_duty1_sound, speed)
 			set_sound_speed(pulse1_duty2_sound, speed)
 			set_sound_speed(pulse1_duty3_sound, speed)
 			set_sound_speed(pulse1_duty4_sound, speed)
-			set_sound_volume(pulse1_duty1_sound, v1)
-			set_sound_volume(pulse1_duty2_sound, v2)
-			set_sound_volume(pulse1_duty3_sound, v3)
-			set_sound_volume(pulse1_duty4_sound, v4)
+
+			set_sound_volume(pulse1_duty1_sound, duty == 0 and pulse1_gain or 0)
+			set_sound_volume(pulse1_duty2_sound, duty == 1 and pulse1_gain or 0)
+			set_sound_volume(pulse1_duty3_sound, duty == 2 and pulse1_gain or 0)
+			set_sound_volume(pulse1_duty4_sound, duty == 3 and pulse1_gain or 0)
 		end
 
 		if pulse2_raw <= 0 then
@@ -499,20 +487,18 @@ return function (dmc_reader: DmcReader): APUInstance
 			set_sound_volume(pulse2_duty3_sound, 0)
 			set_sound_volume(pulse2_duty4_sound, 0)
 		else
-			local duty = bit32.band(bit32.rshift(pulse2_control, 6), 0x03) + 1
+			local duty = bit32.band(bit32.rshift(pulse2_control, 6), 0x03)
 			local speed = PULSE_SPEED_NUM / (pulse2_timer + 1)
-			local v1 = if duty == 1 then pulse2_gain else 0
-			local v2 = if duty == 2 then pulse2_gain else 0
-			local v3 = if duty == 3 then pulse2_gain else 0
-			local v4 = if duty == 4 then pulse2_gain else 0
+
 			set_sound_speed(pulse2_duty1_sound, speed)
 			set_sound_speed(pulse2_duty2_sound, speed)
 			set_sound_speed(pulse2_duty3_sound, speed)
 			set_sound_speed(pulse2_duty4_sound, speed)
-			set_sound_volume(pulse2_duty1_sound, v1)
-			set_sound_volume(pulse2_duty2_sound, v2)
-			set_sound_volume(pulse2_duty3_sound, v3)
-			set_sound_volume(pulse2_duty4_sound, v4)
+
+			set_sound_volume(pulse2_duty1_sound, duty == 0 and pulse2_gain or 0)
+			set_sound_volume(pulse2_duty2_sound, duty == 1 and pulse2_gain or 0)
+			set_sound_volume(pulse2_duty3_sound, duty == 2 and pulse2_gain or 0)
+			set_sound_volume(pulse2_duty4_sound, duty == 3 and pulse2_gain or 0)
 		end
 
 		if mmc5_pulse1_raw <= 0 then
@@ -521,20 +507,18 @@ return function (dmc_reader: DmcReader): APUInstance
 			set_sound_volume(mmc5_pulse1_duty3_sound, 0)
 			set_sound_volume(mmc5_pulse1_duty4_sound, 0)
 		else
-			local duty = bit32.band(bit32.rshift(mmc5_pulse1_control, 6), 0x03) + 1
+			local duty = bit32.band(bit32.rshift(mmc5_pulse1_control, 6), 0x03)
 			local speed = PULSE_SPEED_NUM / (mmc5_pulse1_timer + 1)
-			local v1 = if duty == 1 then mmc5_pulse1_gain else 0
-			local v2 = if duty == 2 then mmc5_pulse1_gain else 0
-			local v3 = if duty == 3 then mmc5_pulse1_gain else 0
-			local v4 = if duty == 4 then mmc5_pulse1_gain else 0
+
 			set_sound_speed(mmc5_pulse1_duty1_sound, speed)
 			set_sound_speed(mmc5_pulse1_duty2_sound, speed)
 			set_sound_speed(mmc5_pulse1_duty3_sound, speed)
 			set_sound_speed(mmc5_pulse1_duty4_sound, speed)
-			set_sound_volume(mmc5_pulse1_duty1_sound, v1)
-			set_sound_volume(mmc5_pulse1_duty2_sound, v2)
-			set_sound_volume(mmc5_pulse1_duty3_sound, v3)
-			set_sound_volume(mmc5_pulse1_duty4_sound, v4)
+
+			set_sound_volume(mmc5_pulse1_duty1_sound, duty == 0 and mmc5_pulse1_gain or 0)
+			set_sound_volume(mmc5_pulse1_duty2_sound, duty == 1 and mmc5_pulse1_gain or 0)
+			set_sound_volume(mmc5_pulse1_duty3_sound, duty == 2 and mmc5_pulse1_gain or 0)
+			set_sound_volume(mmc5_pulse1_duty4_sound, duty == 3 and mmc5_pulse1_gain or 0)
 		end
 
 		if mmc5_pulse2_raw <= 0 then
@@ -543,20 +527,18 @@ return function (dmc_reader: DmcReader): APUInstance
 			set_sound_volume(mmc5_pulse2_duty3_sound, 0)
 			set_sound_volume(mmc5_pulse2_duty4_sound, 0)
 		else
-			local duty = bit32.band(bit32.rshift(mmc5_pulse2_control, 6), 0x03) + 1
+			local duty = bit32.band(bit32.rshift(mmc5_pulse2_control, 6), 0x03)
 			local speed = PULSE_SPEED_NUM / (mmc5_pulse2_timer + 1)
-			local v1 = if duty == 1 then mmc5_pulse2_gain else 0
-			local v2 = if duty == 2 then mmc5_pulse2_gain else 0
-			local v3 = if duty == 3 then mmc5_pulse2_gain else 0
-			local v4 = if duty == 4 then mmc5_pulse2_gain else 0
+
 			set_sound_speed(mmc5_pulse2_duty1_sound, speed)
 			set_sound_speed(mmc5_pulse2_duty2_sound, speed)
 			set_sound_speed(mmc5_pulse2_duty3_sound, speed)
 			set_sound_speed(mmc5_pulse2_duty4_sound, speed)
-			set_sound_volume(mmc5_pulse2_duty1_sound, v1)
-			set_sound_volume(mmc5_pulse2_duty2_sound, v2)
-			set_sound_volume(mmc5_pulse2_duty3_sound, v3)
-			set_sound_volume(mmc5_pulse2_duty4_sound, v4)
+
+			set_sound_volume(mmc5_pulse2_duty1_sound, duty == 0 and mmc5_pulse2_gain or 0)
+			set_sound_volume(mmc5_pulse2_duty2_sound, duty == 1 and mmc5_pulse2_gain or 0)
+			set_sound_volume(mmc5_pulse2_duty3_sound, duty == 2 and mmc5_pulse2_gain or 0)
+			set_sound_volume(mmc5_pulse2_duty4_sound, duty == 3 and mmc5_pulse2_gain or 0)
 		end
 
 		if triangle_raw > 0 then
@@ -571,13 +553,25 @@ return function (dmc_reader: DmcReader): APUInstance
 			local active_bank = if noise_short_mode then noise_short_sound_bank else noise_long_sound_bank
 			local inactive_bank = if noise_short_mode then noise_long_sound_bank else noise_short_sound_bank
 
-			for i = 1, #active_bank do
+			for i, v in active_bank do
 				local target = if noise_raw > 0 and i == active_index then noise_gain else 0
-				set_sound_volume(active_bank[i], target)
+				set_sound_volume(v, target)
 			end
-			for i = 1, #inactive_bank do
-				set_sound_volume(inactive_bank[i], 0)
+			for _, v in inactive_bank do
+				set_sound_volume(v, 0)
 			end
+		end
+	end
+
+	-- Coalesce expensive Roblox sound-property updates until the next APU sync point.
+	local function queue_audio_mixer_update()
+		mixer_dirty = true
+	end
+
+	local function sync_audio_mixer()
+		if mixer_dirty then
+			update_audio_mixer()
+			mixer_dirty = false
 		end
 	end
 
@@ -726,6 +720,11 @@ return function (dmc_reader: DmcReader): APUInstance
 	end
 
 	local function apu_step(cycle_count: number)
+		if cycle_count <= 0 then
+			sync_audio_mixer()
+			return
+		end
+
 		local should_mix = false
 		local remaining = cycle_count
 		local dmc_counter = dmc_timer_counter
@@ -828,10 +827,9 @@ return function (dmc_reader: DmcReader): APUInstance
 		dmc_mix_pending = mix_pending
 		dmc_mix_counter = mix_counter
 
-		if should_mix then
+		if should_mix or mixer_dirty then
 			update_audio_mixer()
-			dmc_mix_pending = false
-			dmc_mix_counter = 0
+			mixer_dirty = false
 		end
 	end
 
@@ -974,12 +972,13 @@ return function (dmc_reader: DmcReader): APUInstance
 			end
 		end
 
-		update_audio_mixer()
+		queue_audio_mixer_update()
 	end
 
 	local function set_mmc5_enabled(enabled: boolean)
 		mmc5_enabled = enabled
 		update_audio_mixer()
+		mixer_dirty = false
 	end
 
 	local function apu_mmc5_cpu_read(addr: number, value: number)
@@ -1035,7 +1034,7 @@ return function (dmc_reader: DmcReader): APUInstance
 			mmc5_pulse_running = bit32.band(mmc5_pulse_running, mmc5_pulse_enable)
 		end
 
-		update_audio_mixer()
+		queue_audio_mixer_update()
 	end
 
 	local function apu_read_mmc5(addr: number): number
@@ -1048,10 +1047,8 @@ return function (dmc_reader: DmcReader): APUInstance
 			mmc5_pcm_irq_trip = false
 			return value
 		end
-		if addr == 0x5015 then
-			return bit32.band(mmc5_pulse_running, 0x03)
-		end
-		return 0
+
+		return addr == 0x5015 and bit32.band(mmc5_pulse_running, 0x03) or 0
 	end
 
 	local function apu_reset()
@@ -1132,6 +1129,7 @@ return function (dmc_reader: DmcReader): APUInstance
 		dmc_mix_counter = 0
 
 		update_audio_mixer()
+		mixer_dirty = false
 	end
 
 	local function apu_irq_pending(): boolean
@@ -1148,6 +1146,7 @@ return function (dmc_reader: DmcReader): APUInstance
 
 	return {
 		step = apu_step,
+		syncMixer = sync_audio_mixer,
 		readStatus = apu_read_status,
 		write = apu_write,
 		writeMmc5 = apu_write_mmc5,
@@ -1159,4 +1158,3 @@ return function (dmc_reader: DmcReader): APUInstance
 		consumeDmaStallCycles = consume_dmc_dma_stall_cycles,
 	}
 end
-
