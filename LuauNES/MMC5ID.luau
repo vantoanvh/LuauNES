@@ -50,8 +50,7 @@ return function(buf: buffer, start: number, len: number): number
 	local crc = 0xFFFFFFFF
 
 	if len <= 0 then
-		local empty_crc = bit32.bnot(crc)
-		local empty_u32 = empty_crc % U32_MOD
+		local empty_u32 = bit32.bnot(crc) % U32_MOD
 
 		if empty_u32 < 0 then
 			empty_u32 += U32_MOD
@@ -60,14 +59,14 @@ return function(buf: buffer, start: number, len: number): number
 		return MMC5_WRAM_UNITS_BY_CRC[empty_u32]
 	end
 
-	for i = 0, len - 1 do
-		local b = buffer.readu8(buf, start + i)
+	local finish = start + len - 1
+	for i = start, finish do
+		local b = buffer.readu8(buf, i)
 		local idx = bit32.band(bit32.bxor(crc, b), 0xFF)
 		crc = bit32.bxor(bit32.rshift(crc, 8), buffer.readu32(CRC32_TABLE, idx * 4))
 	end
 
-	local final_crc = bit32.bnot(crc)
-	local final_u32 = final_crc % U32_MOD
+	local final_u32 = bit32.bnot(crc) % U32_MOD
 	if final_u32 < 0 then
 		final_u32 += U32_MOD
 	end
