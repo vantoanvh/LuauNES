@@ -55,16 +55,8 @@ local function atLeastOne(value: number): number
 end
 
 local function wrapBank(bank: number, count: number): number
-	if count <= 0 then
-		return 0
-	end
-
 	local wrapped = bank % count
-	if wrapped < 0 then
-		return wrapped + count
-	end
-
-	return wrapped
+	return wrapped < 0 and wrapped + count or wrapped
 end
 
 local function normalizeOffset(offset: number, size: number): number
@@ -72,16 +64,12 @@ local function normalizeOffset(offset: number, size: number): number
 		return 0
 	end
 
-	if bit32.band(size, size - 1) == 0 then
+	if not bit32.btest(size, size - 1) then
 		return bit32.band(offset, size - 1)
 	end
 
 	local wrapped = offset % size
-	if wrapped < 0 then
-		return wrapped + size
-	end
-
-	return wrapped
+	return wrapped < 0 and wrapped + size or wrapped
 end
 
 --// MAPPER_000
@@ -96,11 +84,7 @@ local function NROM(config: MapperConfig): Mapper
 			return 0
 		end
 
-		if prg_banks_16k <= 1 then
-			return bit32.band(addr - 0x8000, 0x3FFF)
-		end
-
-		return bit32.band(addr - 0x8000, 0x7FFF)
+		return prg_banks_16k <= 1 and bit32.band(addr - 0x8000, 0x3FFF) or bit32.band(addr - 0x8000, 0x7FFF)
 	end
 
 	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
@@ -117,7 +101,15 @@ local function NROM(config: MapperConfig): Mapper
 			return nil
 		end
 
-		return normalizeOffset(addr - 0x6000, prg_ram_size)
+		local offset = addr - 0x6000
+		local size = prg_ram_size
+
+		if not bit32.btest(size, size - 1) then
+			return bit32.band(offset, size - 1)
+		end
+
+		local wrapped = offset % size
+		return wrapped < 0 and wrapped + size or wrapped
 	end
 
 	return {
@@ -166,8 +158,54 @@ local function MMC1(config: MapperConfig): Mapper
 	local prg = 0
 	local prg_ram_enabled = prg_ram_available
 
-	local function update_mirroring()
+	local prg_32k_mode = false
+	local prg_base_32k = 0
+	local prg_base_8000 = 0
+	local prg_base_c000 = (prg_banks_16k - 1) * 0x4000
+
+	local chr_8k_mode = false
+	local chr_base_8k = 0
+	local chr_base_0000 = 0
+	local chr_base_1000 = 0
+
+	local function recalc_prg_map()
+		local prg_mode = bit32.band(bit32.rshift(control, 2), 0x03)
+		local prg_bank = bit32.band(prg, 0x0F)
+
+		if prg_mode == 0 or prg_mode == 1 then
+			prg_32k_mode = true
+			local bank32 = wrapBank(bit32.rshift(bit32.band(prg_bank, 0x0E), 1), prg_banks_32k)
+			prg_base_32k = bank32 * 0x8000
+			return
+		end
+
+		prg_32k_mode = false
+		if prg_mode == 2 then
+			prg_base_8000 = 0
+			prg_base_c000 = wrapBank(prg_bank, prg_banks_16k) * 0x4000
+		else
+			prg_base_8000 = wrapBank(prg_bank, prg_banks_16k) * 0x4000
+			prg_base_c000 = (prg_banks_16k - 1) * 0x4000
+		end
+	end
+
+	local function recalc_chr_map()
+		local chr_mode = bit32.band(bit32.rshift(control, 4), 0x01)
+		if chr_mode == 0 then
+			chr_8k_mode = true
+			local bank8 = wrapBank(bit32.rshift(bit32.band(chr0, 0x1E), 1), chr_banks_8k)
+			chr_base_8k = bank8 * 0x2000
+		else
+			chr_8k_mode = false
+			chr_base_0000 = wrapBank(chr0, chr_banks_4k) * 0x1000
+			chr_base_1000 = wrapBank(chr1, chr_banks_4k) * 0x1000
+		end
+	end
+
+	local function update_control_dependent_state()
 		mirroring = bit32.band(control, 0x03)
+		recalc_prg_map()
+		recalc_chr_map()
 	end
 
 	local function map_prg_addr(addr: number): number
@@ -176,47 +214,28 @@ local function MMC1(config: MapperConfig): Mapper
 			return 0
 		end
 
-		local prg_mode = bit32.band(bit32.rshift(control, 2), 0x03)
-		local prg_bank = bit32.band(prg, 0x0F)
-
-		if prg_mode == 0 or prg_mode == 1 then
-			local bank32 = wrapBank(bit32.rshift(bit32.band(prg_bank, 0x0E), 1), prg_banks_32k)
-			return bank32 * 0x8000 + bit32.band(addr - 0x8000, 0x7FFF)
-		end
-
-		if prg_mode == 2 then
-			if addr < 0xC000 then
-				return bit32.band(addr - 0x8000, 0x3FFF)
-			end
-
-			local bank = wrapBank(prg_bank, prg_banks_16k)
-			return bank * 0x4000 + bit32.band(addr, 0x3FFF)
+		if prg_32k_mode then
+			return prg_base_32k + bit32.band(addr - 0x8000, 0x7FFF)
 		end
 
 		if addr < 0xC000 then
-			local bank = wrapBank(prg_bank, prg_banks_16k)
-			return bank * 0x4000 + bit32.band(addr, 0x3FFF)
+			return prg_base_8000 + bit32.band(addr, 0x3FFF)
 		end
 
-		return (prg_banks_16k - 1) * 0x4000 + bit32.band(addr, 0x3FFF)
+		return prg_base_c000 + bit32.band(addr, 0x3FFF)
 	end
 
 	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
-		local chr_mode = bit32.band(bit32.rshift(control, 4), 0x01)
-
-		if chr_mode == 0 then
-			local bank8 = wrapBank(bit32.rshift(bit32.band(chr0, 0x1E), 1), chr_banks_8k)
-			return bank8 * 0x2000 + addr
+		if chr_8k_mode then
+			return chr_base_8k + addr
 		end
 
 		if addr < 0x1000 then
-			local bank4 = wrapBank(chr0, chr_banks_4k)
-			return bank4 * 0x1000 + bit32.band(addr, 0x0FFF)
+			return chr_base_0000 + bit32.band(addr, 0x0FFF)
 		end
 
-		local bank4 = wrapBank(chr1, chr_banks_4k)
-		return bank4 * 0x1000 + bit32.band(addr, 0x0FFF)
+		return chr_base_1000 + bit32.band(addr, 0x0FFF)
 	end
 
 	local function write_cpu(addr: number, value: number)
@@ -229,7 +248,7 @@ local function MMC1(config: MapperConfig): Mapper
 		if bit32.btest(value, 0x80) then
 			shift = 0x10
 			control = bit32.bor(control, 0x0C)
-			update_mirroring()
+			update_control_dependent_state()
 			return
 		end
 
@@ -246,14 +265,17 @@ local function MMC1(config: MapperConfig): Mapper
 
 		if reg == 0 then
 			control = data
-			update_mirroring()
+			update_control_dependent_state()
 		elseif reg == 1 then
 			chr0 = data
+			recalc_chr_map()
 		elseif reg == 2 then
 			chr1 = data
+			recalc_chr_map()
 		else
 			prg = bit32.band(data, 0x0F)
 			prg_ram_enabled = prg_ram_available and not bit32.btest(data, 0x10)
+			recalc_prg_map()
 		end
 
 		shift = 0x10
@@ -280,7 +302,7 @@ local function MMC1(config: MapperConfig): Mapper
 		chr1 = 0
 		prg = 0
 		prg_ram_enabled = prg_ram_available
-		update_mirroring()
+		update_control_dependent_state()
 	end
 
 	reset_mapper()
@@ -453,13 +475,47 @@ local function MMC3(config: MapperConfig): Mapper
 	local four_screen = config.fourScreen
 	local mirroring = config.initialMirroring
 
-	local regs = buffer.create(8)
+	-- MMC3 bank registers R0-R7
+	local reg0 = 0
+	local reg1 = 0
+	local reg2 = 0
+	local reg3 = 0
+	local reg4 = 0
+	local reg5 = 0
+	local reg6 = 0
+	local reg7 = 0
+
 	local bank_select = 0
 	local prg_mode = 0
 	local chr_mode = 0
 
-	local prg_slots = table.create(4, 0)
-	local chr_slots = table.create(8, 0)
+	-- 4x 8 KiB PRG slots
+	local prg_slot0 = 0
+	local prg_slot1 = 0
+	local prg_slot2 = 0
+	local prg_slot3 = 0
+	local prg_base0 = 0
+	local prg_base1 = 0
+	local prg_base2 = 0
+	local prg_base3 = 0
+
+	-- 8x 1 KiB CHR slots
+	local chr_slot0 = 0
+	local chr_slot1 = 0
+	local chr_slot2 = 0
+	local chr_slot3 = 0
+	local chr_slot4 = 0
+	local chr_slot5 = 0
+	local chr_slot6 = 0
+	local chr_slot7 = 0
+	local chr_base0 = 0
+	local chr_base1 = 0
+	local chr_base2 = 0
+	local chr_base3 = 0
+	local chr_base4 = 0
+	local chr_base5 = 0
+	local chr_base6 = 0
+	local chr_base7 = 0
 
 	local irq_latch = 0
 	local irq_counter = 0
@@ -474,52 +530,96 @@ local function MMC3(config: MapperConfig): Mapper
 	local prg_ram_enabled = prg_ram_available
 	local prg_ram_write_protect = true
 
-	local function recalc_prg_slots()
-		local last_bank = prg_total_8k - 1
-		local second_last = math.max(last_bank - 1, 0)
-		local r6 = wrapBank(buffer.readu8(regs, 6), prg_total_8k)
-		local r7 = wrapBank(buffer.readu8(regs, 7), prg_total_8k)
+	local function set_reg(index: number, value: number)
+		value = bit32.band(value, 0xFF)
 
-		if prg_mode == 0 then
-			prg_slots[1] = r6
-			prg_slots[2] = r7
-			prg_slots[3] = second_last
-			prg_slots[4] = last_bank
+		if index == 0 then
+			reg0 = value
+		elseif index == 1 then
+			reg1 = value
+		elseif index == 2 then
+			reg2 = value
+		elseif index == 3 then
+			reg3 = value
+		elseif index == 4 then
+			reg4 = value
+		elseif index == 5 then
+			reg5 = value
+		elseif index == 6 then
+			reg6 = value
 		else
-			prg_slots[1] = second_last
-			prg_slots[2] = r7
-			prg_slots[3] = r6
-			prg_slots[4] = last_bank
+			reg7 = value
 		end
 	end
 
+	local function recalc_prg_slots()
+		local count = prg_total_8k
+
+		local last_bank = count - 1
+		local second_last = math.max(last_bank - 1, 0)
+
+		local w6 = reg6 % count
+		local r6 = w6 < 0 and w6 + count or w6
+
+		local w7 = reg7 % count
+		local r7 = w7 < 0 and w7 + count or w7
+
+		if prg_mode == 0 then
+			prg_slot0 = r6
+			prg_slot1 = r7
+			prg_slot2 = second_last
+			prg_slot3 = last_bank
+		else
+			prg_slot0 = second_last
+			prg_slot1 = r7
+			prg_slot2 = r6
+			prg_slot3 = last_bank
+		end
+
+		prg_base0 = prg_slot0 * 0x2000
+		prg_base1 = prg_slot1 * 0x2000
+		prg_base2 = prg_slot2 * 0x2000
+		prg_base3 = prg_slot3 * 0x2000
+	end
+
 	local function recalc_chr_slots()
-		local r0 = buffer.readu8(regs, 0)
-		local r1 = buffer.readu8(regs, 1)
-		local r2 = buffer.readu8(regs, 2)
-		local r3 = buffer.readu8(regs, 3)
-		local r4 = buffer.readu8(regs, 4)
-		local r5 = buffer.readu8(regs, 5)
+		local count = chr_total_1k
+
+		local r0 = bit32.band(reg0, 0xFE)
+		local r1 = bit32.band(reg1, 0xFE)
+		local r2 = reg2
+		local r3 = reg3
+		local r4 = reg4
+		local r5 = reg5
 
 		if chr_mode == 0 then
-			chr_slots[1] = wrapBank(bit32.band(r0, 0xFE), chr_total_1k)
-			chr_slots[2] = wrapBank(bit32.band(r0, 0xFE) + 1, chr_total_1k)
-			chr_slots[3] = wrapBank(bit32.band(r1, 0xFE), chr_total_1k)
-			chr_slots[4] = wrapBank(bit32.band(r1, 0xFE) + 1, chr_total_1k)
-			chr_slots[5] = wrapBank(r2, chr_total_1k)
-			chr_slots[6] = wrapBank(r3, chr_total_1k)
-			chr_slots[7] = wrapBank(r4, chr_total_1k)
-			chr_slots[8] = wrapBank(r5, chr_total_1k)
+			chr_slot0 = wrapBank(r0, count)
+			chr_slot1 = wrapBank(r0 + 1, count)
+			chr_slot2 = wrapBank(r1, count)
+			chr_slot3 = wrapBank(r1 + 1, count)
+			chr_slot4 = wrapBank(r2, count)
+			chr_slot5 = wrapBank(r3, count)
+			chr_slot6 = wrapBank(r4, count)
+			chr_slot7 = wrapBank(r5, count)
 		else
-			chr_slots[1] = wrapBank(r2, chr_total_1k)
-			chr_slots[2] = wrapBank(r3, chr_total_1k)
-			chr_slots[3] = wrapBank(r4, chr_total_1k)
-			chr_slots[4] = wrapBank(r5, chr_total_1k)
-			chr_slots[5] = wrapBank(bit32.band(r0, 0xFE), chr_total_1k)
-			chr_slots[6] = wrapBank(bit32.band(r0, 0xFE) + 1, chr_total_1k)
-			chr_slots[7] = wrapBank(bit32.band(r1, 0xFE), chr_total_1k)
-			chr_slots[8] = wrapBank(bit32.band(r1, 0xFE) + 1, chr_total_1k)
+			chr_slot0 = wrapBank(r2, count)
+			chr_slot1 = wrapBank(r3, count)
+			chr_slot2 = wrapBank(r4, count)
+			chr_slot3 = wrapBank(r5, count)
+			chr_slot4 = wrapBank(r0, count)
+			chr_slot5 = wrapBank(r0 + 1, count)
+			chr_slot6 = wrapBank(r1, count)
+			chr_slot7 = wrapBank(r1 + 1, count)
 		end
+
+		chr_base0 = chr_slot0 * 0x0400
+		chr_base1 = chr_slot1 * 0x0400
+		chr_base2 = chr_slot2 * 0x0400
+		chr_base3 = chr_slot3 * 0x0400
+		chr_base4 = chr_slot4 * 0x0400
+		chr_base5 = chr_slot5 * 0x0400
+		chr_base6 = chr_slot6 * 0x0400
+		chr_base7 = chr_slot7 * 0x0400
 	end
 
 	local function map_prg_addr(addr: number): number
@@ -529,20 +629,49 @@ local function MMC3(config: MapperConfig): Mapper
 		end
 
 		local slot = bit32.rshift(addr - 0x8000, 13)
-		local bank = prg_slots[slot + 1]
-		return bank * 0x2000 + bit32.band(addr, 0x1FFF)
+		if slot == 0 then
+			return prg_base0 + bit32.band(addr, 0x1FFF)
+		end
+		if slot == 1 then
+			return prg_base1 + bit32.band(addr, 0x1FFF)
+		end
+		if slot == 2 then
+			return prg_base2 + bit32.band(addr, 0x1FFF)
+		end
+		return prg_base3 + bit32.band(addr, 0x1FFF)
 	end
 
 	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local segment = bit32.rshift(addr, 10)
-		local bank = chr_slots[segment + 1]
-		return bank * 0x0400 + bit32.band(addr, 0x03FF)
+		if segment == 0 then
+			return chr_base0 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 1 then
+			return chr_base1 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 2 then
+			return chr_base2 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 3 then
+			return chr_base3 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 4 then
+			return chr_base4 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 5 then
+			return chr_base5 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 6 then
+			return chr_base6 + bit32.band(addr, 0x03FF)
+		end
+		return chr_base7 + bit32.band(addr, 0x03FF)
 	end
 
 	local function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		value = bit32.band(value, 0xFF)
+
 		if addr < 0x8000 then
 			return
 		end
@@ -557,7 +686,7 @@ local function MMC3(config: MapperConfig): Mapper
 				recalc_prg_slots()
 				recalc_chr_slots()
 			else
-				buffer.writeu8(regs, bank_select, value)
+				set_reg(bank_select, value)
 				if bank_select <= 5 then
 					recalc_chr_slots()
 				else
@@ -595,50 +724,48 @@ local function MMC3(config: MapperConfig): Mapper
 	end
 
 	local function map_prg_ram_addr(addr: number): number?
-		if not prg_ram_available then
-			return nil
+		if prg_ram_available then
+			addr = bit32.band(addr, 0xFFFF)
+			return if addr >= 0x6000 and addr < 0x8000 then normalizeOffset(addr - 0x6000, prg_ram_size) else nil
 		end
 
-		addr = bit32.band(addr, 0xFFFF)
-		if addr < 0x6000 or addr >= 0x8000 then
-			return nil
-		end
-
-		return normalizeOffset(addr - 0x6000, prg_ram_size)
-	end
-
-	local function clock_irq_counter()
-		if irq_counter == 0 or irq_reload then
-			irq_counter = irq_latch
-			irq_reload = false
-		else
-			irq_counter = bit32.band(irq_counter - 1, 0xFF)
-		end
-
-		if irq_counter == 0 and irq_enabled then
-			irq_pending = true
-		end
+		return nil
 	end
 
 	local function clock_a12(a12_high: boolean)
-		if not a12_high then
+		if a12_high then
+			if not a12_prev and a12_low_cycles >= 12 then
+				if irq_counter == 0 or irq_reload then
+					irq_counter = irq_latch
+					irq_reload = false
+				else
+					irq_counter = bit32.band(irq_counter - 1, 0xFF)
+				end
+
+				if irq_counter == 0 and irq_enabled then
+					irq_pending = true
+				end
+			end
+
+			a12_prev = true
+			a12_low_cycles = 0
+		else
 			a12_prev = false
 			a12_low_cycles = math.min(a12_low_cycles + 1, 0x7FFFFFFF)
-			return
 		end
-
-		if (not a12_prev) and a12_low_cycles >= 12 then
-			clock_irq_counter()
-		end
-
-		a12_prev = true
-		a12_low_cycles = 0
 	end
 
 	local function reset_mapper()
 		mirroring = config.initialMirroring
 
-		buffer.fill(regs, 0, 0, 8)
+		reg0 = 0
+		reg1 = 0
+		reg2 = 0
+		reg3 = 0
+		reg4 = 0
+		reg5 = 0
+		reg6 = 0
+		reg7 = 0
 
 		bank_select = 0
 		prg_mode = 0
@@ -712,7 +839,7 @@ local function MMC5(config: MapperConfig): Mapper
 	local mmc5_prg_mode = 3
 	local mmc5_chr_mode = 3
 	local mmc5_prg_regs = buffer.create(4)
-	local mmc5_chr_regs = table.create(12, 0)
+	local mmc5_chr_regs = buffer.create(12 * 2)
 	local mmc5_chr_high = 0
 	local mmc5_last_chr_reg = 0x5120
 
@@ -752,108 +879,189 @@ local function MMC5(config: MapperConfig): Mapper
 	local mmc5_exattr_fetch_counter = 0
 	local mmc5_exattr_selected_chr_bank = 0
 
-	local function mmc5_prg_reg_value(reg_index: number): number
-		return buffer.readu8(mmc5_prg_regs, reg_index)
+	local mmc5_prg_base_mode0 = 0
+	local mmc5_prg_base_mode1_low = 0
+	local mmc5_prg_base_mode1_high = 0
+	local mmc5_prg_base_mode2_low = 0
+	local mmc5_prg_base_mode2_mid = 0
+	local mmc5_prg_base_mode2_high = 0
+	local mmc5_prg_base_slot0 = 0
+	local mmc5_prg_base_slot1 = 0
+	local mmc5_prg_base_slot2 = 0
+	local mmc5_prg_base_slot3 = 0
+
+	local mmc5_prg_ram_base_6000 = 0
+	local mmc5_prg_reg0_maps_ram = false
+	local mmc5_prg_reg1_maps_ram = false
+	local mmc5_prg_reg2_maps_ram = false
+	local mmc5_prg_ram_reg0_base_8k = 0
+	local mmc5_prg_ram_reg1_base_8k = 0
+	local mmc5_prg_ram_reg2_base_8k = 0
+	local mmc5_prg_ram_reg1_base_16k = 0
+
+	local mmc5_chr_set_a_base0 = 0
+	local mmc5_chr_set_a_base1 = 0
+	local mmc5_chr_set_a_base2 = 0
+	local mmc5_chr_set_a_base3 = 0
+	local mmc5_chr_set_a_base4 = 0
+	local mmc5_chr_set_a_base5 = 0
+	local mmc5_chr_set_a_base6 = 0
+	local mmc5_chr_set_a_base7 = 0
+	local mmc5_chr_set_b_base0 = 0
+	local mmc5_chr_set_b_base1 = 0
+	local mmc5_chr_set_b_base2 = 0
+	local mmc5_chr_set_b_base3 = 0
+	local mmc5_chr_set_b_base4 = 0
+	local mmc5_chr_set_b_base5 = 0
+	local mmc5_chr_set_b_base6 = 0
+	local mmc5_chr_set_b_base7 = 0
+
+	local function recalc_mmc5_prg_slots()
+		local reg0 = buffer.readu8(mmc5_prg_regs, 0)
+		local reg1 = buffer.readu8(mmc5_prg_regs, 1)
+		local reg2 = buffer.readu8(mmc5_prg_regs, 2)
+		local reg3 = buffer.readu8(mmc5_prg_regs, 3)
+
+		local bank8_0 = wrapBank(bit32.band(reg0, 0x7F), prg_total_8k)
+		local bank8_1 = wrapBank(bit32.band(reg1, 0x7F), prg_total_8k)
+		local bank8_2 = wrapBank(bit32.band(reg2, 0x7F), prg_total_8k)
+		local bank8_3 = wrapBank(bit32.band(reg3, 0x7F), prg_total_8k)
+
+		mmc5_prg_base_mode0 = wrapBank(bit32.rshift(bank8_3, 2), prg_total_32k) * 0x8000
+		mmc5_prg_base_mode1_low = wrapBank(bit32.rshift(bank8_1, 1), prg_total_16k) * 0x4000
+		mmc5_prg_base_mode1_high = wrapBank(bit32.rshift(bank8_3, 1), prg_total_16k) * 0x4000
+		mmc5_prg_base_mode2_low = mmc5_prg_base_mode1_low
+		mmc5_prg_base_mode2_mid = bank8_2 * 0x2000
+		mmc5_prg_base_mode2_high = bank8_3 * 0x2000
+		mmc5_prg_base_slot0 = bank8_0 * 0x2000
+		mmc5_prg_base_slot1 = bank8_1 * 0x2000
+		mmc5_prg_base_slot2 = bank8_2 * 0x2000
+		mmc5_prg_base_slot3 = bank8_3 * 0x2000
+
+		mmc5_prg_reg0_maps_ram = not bit32.btest(reg0, 0x80)
+		mmc5_prg_reg1_maps_ram = not bit32.btest(reg1, 0x80)
+		mmc5_prg_reg2_maps_ram = not bit32.btest(reg2, 0x80)
+		mmc5_prg_ram_reg0_base_8k = wrapBank(bit32.band(reg0, 0x7F), prg_ram_total_8k) * 0x2000
+		mmc5_prg_ram_reg1_base_8k = wrapBank(bit32.band(reg1, 0x7F), prg_ram_total_8k) * 0x2000
+		mmc5_prg_ram_reg2_base_8k = wrapBank(bit32.band(reg2, 0x7F), prg_ram_total_8k) * 0x2000
+		mmc5_prg_ram_reg1_base_16k = wrapBank(bit32.rshift(bit32.band(reg1, 0x7F), 1), prg_ram_total_16k) * 0x4000
+		mmc5_prg_ram_base_6000 = wrapBank(mmc5_prg_ram_bank, prg_ram_total_8k) * 0x2000
 	end
 
-	local function mmc5_prg_bank_8k(reg_index: number): number
-		return wrapBank(bit32.band(mmc5_prg_reg_value(reg_index), 0x7F), prg_total_8k)
+	local function mmc5_wrap_chr_base(bank_1k: number): number
+		return wrapBank(bank_1k, chr_total_1k) * 0x0400
 	end
 
-	local function mmc5_prg_reg_maps_ram(reg_index: number): boolean
-		if reg_index >= 3 then
-			return false
+	local function recalc_mmc5_chr_slots()
+		local r0 = buffer.readu16(mmc5_chr_regs, 0)
+		local r1 = buffer.readu16(mmc5_chr_regs, 2)
+		local r2 = buffer.readu16(mmc5_chr_regs, 4)
+		local r3 = buffer.readu16(mmc5_chr_regs, 6)
+		local r4 = buffer.readu16(mmc5_chr_regs, 8)
+		local r5 = buffer.readu16(mmc5_chr_regs, 10)
+		local r6 = buffer.readu16(mmc5_chr_regs, 12)
+		local r7 = buffer.readu16(mmc5_chr_regs, 14)
+		local r8 = buffer.readu16(mmc5_chr_regs, 16)
+		local r9 = buffer.readu16(mmc5_chr_regs, 18)
+		local r10 = buffer.readu16(mmc5_chr_regs, 20)
+		local r11 = buffer.readu16(mmc5_chr_regs, 22)
+
+		if mmc5_chr_mode == 0 then
+			local a = r7 * 8
+			local b = r11 * 8
+			mmc5_chr_set_a_base0 = mmc5_wrap_chr_base(a)
+			mmc5_chr_set_a_base1 = mmc5_wrap_chr_base(a + 1)
+			mmc5_chr_set_a_base2 = mmc5_wrap_chr_base(a + 2)
+			mmc5_chr_set_a_base3 = mmc5_wrap_chr_base(a + 3)
+			mmc5_chr_set_a_base4 = mmc5_wrap_chr_base(a + 4)
+			mmc5_chr_set_a_base5 = mmc5_wrap_chr_base(a + 5)
+			mmc5_chr_set_a_base6 = mmc5_wrap_chr_base(a + 6)
+			mmc5_chr_set_a_base7 = mmc5_wrap_chr_base(a + 7)
+			mmc5_chr_set_b_base0 = mmc5_wrap_chr_base(b)
+			mmc5_chr_set_b_base1 = mmc5_wrap_chr_base(b + 1)
+			mmc5_chr_set_b_base2 = mmc5_wrap_chr_base(b + 2)
+			mmc5_chr_set_b_base3 = mmc5_wrap_chr_base(b + 3)
+			mmc5_chr_set_b_base4 = mmc5_wrap_chr_base(b + 4)
+			mmc5_chr_set_b_base5 = mmc5_wrap_chr_base(b + 5)
+			mmc5_chr_set_b_base6 = mmc5_wrap_chr_base(b + 6)
+			mmc5_chr_set_b_base7 = mmc5_wrap_chr_base(b + 7)
+			return
 		end
 
-		return not bit32.btest(mmc5_prg_reg_value(reg_index), 0x80)
-	end
+		if mmc5_chr_mode == 1 then
+			local a_low = r3 * 4
+			local a_high = r7 * 4
+			local b = r11 * 4
+			mmc5_chr_set_a_base0 = mmc5_wrap_chr_base(a_low)
+			mmc5_chr_set_a_base1 = mmc5_wrap_chr_base(a_low + 1)
+			mmc5_chr_set_a_base2 = mmc5_wrap_chr_base(a_low + 2)
+			mmc5_chr_set_a_base3 = mmc5_wrap_chr_base(a_low + 3)
+			mmc5_chr_set_a_base4 = mmc5_wrap_chr_base(a_high)
+			mmc5_chr_set_a_base5 = mmc5_wrap_chr_base(a_high + 1)
+			mmc5_chr_set_a_base6 = mmc5_wrap_chr_base(a_high + 2)
+			mmc5_chr_set_a_base7 = mmc5_wrap_chr_base(a_high + 3)
+			mmc5_chr_set_b_base0 = mmc5_wrap_chr_base(b)
+			mmc5_chr_set_b_base1 = mmc5_wrap_chr_base(b + 1)
+			mmc5_chr_set_b_base2 = mmc5_wrap_chr_base(b + 2)
+			mmc5_chr_set_b_base3 = mmc5_wrap_chr_base(b + 3)
+			mmc5_chr_set_b_base4 = mmc5_wrap_chr_base(b)
+			mmc5_chr_set_b_base5 = mmc5_wrap_chr_base(b + 1)
+			mmc5_chr_set_b_base6 = mmc5_wrap_chr_base(b + 2)
+			mmc5_chr_set_b_base7 = mmc5_wrap_chr_base(b + 3)
+			return
+		end
 
-	local function mmc5_chr_reg_value(reg_index: number): number
-		return mmc5_chr_regs[reg_index + 1]
+		if mmc5_chr_mode == 2 then
+			local a1 = r1 * 2
+			local a3 = r3 * 2
+			local a5 = r5 * 2
+			local a7 = r7 * 2
+			local b9 = r9 * 2
+			local b11 = r11 * 2
+			mmc5_chr_set_a_base0 = mmc5_wrap_chr_base(a1)
+			mmc5_chr_set_a_base1 = mmc5_wrap_chr_base(a1 + 1)
+			mmc5_chr_set_a_base2 = mmc5_wrap_chr_base(a3)
+			mmc5_chr_set_a_base3 = mmc5_wrap_chr_base(a3 + 1)
+			mmc5_chr_set_a_base4 = mmc5_wrap_chr_base(a5)
+			mmc5_chr_set_a_base5 = mmc5_wrap_chr_base(a5 + 1)
+			mmc5_chr_set_a_base6 = mmc5_wrap_chr_base(a7)
+			mmc5_chr_set_a_base7 = mmc5_wrap_chr_base(a7 + 1)
+			mmc5_chr_set_b_base0 = mmc5_wrap_chr_base(b9)
+			mmc5_chr_set_b_base1 = mmc5_wrap_chr_base(b9 + 1)
+			mmc5_chr_set_b_base2 = mmc5_wrap_chr_base(b11)
+			mmc5_chr_set_b_base3 = mmc5_wrap_chr_base(b11 + 1)
+			mmc5_chr_set_b_base4 = mmc5_wrap_chr_base(b9)
+			mmc5_chr_set_b_base5 = mmc5_wrap_chr_base(b9 + 1)
+			mmc5_chr_set_b_base6 = mmc5_wrap_chr_base(b11)
+			mmc5_chr_set_b_base7 = mmc5_wrap_chr_base(b11 + 1)
+			return
+		end
+
+		mmc5_chr_set_a_base0 = mmc5_wrap_chr_base(r0)
+		mmc5_chr_set_a_base1 = mmc5_wrap_chr_base(r1)
+		mmc5_chr_set_a_base2 = mmc5_wrap_chr_base(r2)
+		mmc5_chr_set_a_base3 = mmc5_wrap_chr_base(r3)
+		mmc5_chr_set_a_base4 = mmc5_wrap_chr_base(r4)
+		mmc5_chr_set_a_base5 = mmc5_wrap_chr_base(r5)
+		mmc5_chr_set_a_base6 = mmc5_wrap_chr_base(r6)
+		mmc5_chr_set_a_base7 = mmc5_wrap_chr_base(r7)
+		mmc5_chr_set_b_base0 = mmc5_wrap_chr_base(r8)
+		mmc5_chr_set_b_base1 = mmc5_wrap_chr_base(r9)
+		mmc5_chr_set_b_base2 = mmc5_wrap_chr_base(r10)
+		mmc5_chr_set_b_base3 = mmc5_wrap_chr_base(r11)
+		mmc5_chr_set_b_base4 = mmc5_wrap_chr_base(r8)
+		mmc5_chr_set_b_base5 = mmc5_wrap_chr_base(r9)
+		mmc5_chr_set_b_base6 = mmc5_wrap_chr_base(r10)
+		mmc5_chr_set_b_base7 = mmc5_wrap_chr_base(r11)
 	end
 
 	local function mmc5_set_chr_reg(reg_index: number, value: number)
-		mmc5_chr_regs[reg_index + 1] = bit32.bor(bit32.band(value, 0xFF), bit32.lshift(mmc5_chr_high, 8))
-	end
-
-	local function mmc5_split_enabled(): boolean
-		return bit32.btest(mmc5_split_control, 0x80)
-	end
-
-	local function mmc5_split_right_side(): boolean
-		return bit32.btest(mmc5_split_control, 0x40)
-	end
-
-	local function mmc5_split_delimiter_tile(): number
-		return bit32.band(mmc5_split_control, 0x1F)
-	end
-
-	local function mmc5_chr_uses_set_a(sprite_16: boolean): boolean
-		if not sprite_16 then
-			return true
-		end
-
-		if mmc5_split_tile_number >= 32 and mmc5_split_tile_number < 40 then
-			return true
-		end
-
-		if (not mmc5_in_frame) and mmc5_last_chr_reg <= 0x5127 then
-			return true
-		end
-
-		return false
-	end
-
-	local function mmc5_mode1_chr_override_active(fetch_kind: number): boolean
-		if fetch_kind ~= 1 then
-			return false
-		end
-
-		if mmc5_exram_mode ~= 1 or not mmc5_in_frame then
-			return false
-		end
-
-		if mmc5_split_tile_number >= 32 and mmc5_split_tile_number < 40 then
-			return false
-		end
-
-		return mmc5_exattr_fetch_counter > 0 and mmc5_exattr_fetch_counter <= 2
-	end
-
-	local function mmc5_chr_bank_from_set_a(mode: number, segment: number): number
-		if mode == 0 then
-			return mmc5_chr_reg_value(7) * 8 + segment
-		end
-
-		if mode == 1 then
-			local reg = if segment < 4 then 3 else 7
-			return mmc5_chr_reg_value(reg) * 4 + bit32.band(segment, 0x03)
-		end
-
-		if mode == 2 then
-			local reg = bit32.bor(bit32.band(segment, 0x06), 0x01)
-			return mmc5_chr_reg_value(reg) * 2 + bit32.band(segment, 0x01)
-		end
-
-		return mmc5_chr_reg_value(segment)
-	end
-
-	local function mmc5_chr_bank_from_set_b(mode: number, segment: number): number
-		if mode == 0 then
-			return mmc5_chr_reg_value(11) * 8 + segment
-		end
-
-		if mode == 1 then
-			return mmc5_chr_reg_value(11) * 4 + bit32.band(segment, 0x03)
-		end
-
-		if mode == 2 then
-			local reg = if bit32.btest(segment, 0x02) then 11 else 9
-			return mmc5_chr_reg_value(reg) * 2 + bit32.band(segment, 0x01)
-		end
-
-		local reg = 8 + bit32.band(segment, 0x03)
-		return mmc5_chr_reg_value(reg)
+		buffer.writeu16(
+			mmc5_chr_regs,
+			reg_index * 2,
+			bit32.bor(bit32.band(value, 0xFF), bit32.lshift(mmc5_chr_high, 8))
+		)
+		recalc_mmc5_chr_slots()
 	end
 
 	local function mmc5_prg_ram_offset(addr: number): number?
@@ -862,8 +1070,7 @@ local function MMC5(config: MapperConfig): Mapper
 		end
 
 		if addr >= 0x6000 and addr < 0x8000 then
-			local bank8 = wrapBank(mmc5_prg_ram_bank, prg_ram_total_8k)
-			return bank8 * 0x2000 + bit32.band(addr - 0x6000, 0x1FFF)
+			return mmc5_prg_ram_base_6000 + bit32.band(addr - 0x6000, 0x1FFF)
 		end
 
 		if addr < 0x8000 or addr >= 0xE000 then
@@ -879,10 +1086,8 @@ local function MMC5(config: MapperConfig): Mapper
 				return nil
 			end
 
-			if mmc5_prg_reg_maps_ram(1) then
-				local reg = mmc5_prg_reg_value(1)
-				local bank16 = wrapBank(bit32.rshift(bit32.band(reg, 0x7F), 1), prg_ram_total_16k)
-				return bank16 * 0x4000 + bit32.band(addr - 0x8000, 0x3FFF)
+			if mmc5_prg_reg1_maps_ram then
+				return mmc5_prg_ram_reg1_base_16k + bit32.band(addr - 0x8000, 0x3FFF)
 			end
 
 			return nil
@@ -890,32 +1095,32 @@ local function MMC5(config: MapperConfig): Mapper
 
 		if mmc5_prg_mode == 2 then
 			if addr < 0xC000 then
-				if mmc5_prg_reg_maps_ram(1) then
-					local reg = mmc5_prg_reg_value(1)
-					local bank16 = wrapBank(bit32.rshift(bit32.band(reg, 0x7F), 1), prg_ram_total_16k)
-					return bank16 * 0x4000 + bit32.band(addr - 0x8000, 0x3FFF)
+				if mmc5_prg_reg1_maps_ram then
+					return mmc5_prg_ram_reg1_base_16k + bit32.band(addr - 0x8000, 0x3FFF)
 				end
 
 				return nil
 			end
 
-			if mmc5_prg_reg_maps_ram(2) then
-				local reg = mmc5_prg_reg_value(2)
-				local bank8 = wrapBank(bit32.band(reg, 0x7F), prg_ram_total_8k)
-				return bank8 * 0x2000 + bit32.band(addr - 0xC000, 0x1FFF)
+			if mmc5_prg_reg2_maps_ram then
+				return mmc5_prg_ram_reg2_base_8k + bit32.band(addr - 0xC000, 0x1FFF)
 			end
 
 			return nil
 		end
 
 		local slot = bit32.rshift(addr - 0x8000, 13)
-		if slot >= 3 or not mmc5_prg_reg_maps_ram(slot) then
+		if slot >= 3 then
 			return nil
 		end
 
-		local reg = mmc5_prg_reg_value(slot)
-		local bank8 = wrapBank(bit32.band(reg, 0x7F), prg_ram_total_8k)
-		return bank8 * 0x2000 + bit32.band(addr, 0x1FFF)
+		if slot == 0 then
+			return if mmc5_prg_reg0_maps_ram then mmc5_prg_ram_reg0_base_8k + bit32.band(addr, 0x1FFF) else nil
+		end
+		if slot == 1 then
+			return if mmc5_prg_reg1_maps_ram then mmc5_prg_ram_reg1_base_8k + bit32.band(addr, 0x1FFF) else nil
+		end
+		return if mmc5_prg_reg2_maps_ram then mmc5_prg_ram_reg2_base_8k + bit32.band(addr, 0x1FFF) else nil
 	end
 
 	local function update_mmc5_simple_mirroring()
@@ -944,42 +1149,47 @@ local function MMC5(config: MapperConfig): Mapper
 		end
 
 		if mmc5_prg_mode == 0 then
-			local bank32 = wrapBank(bit32.rshift(mmc5_prg_bank_8k(3), 2), prg_total_32k)
-			return bank32 * 0x8000 + bit32.band(addr - 0x8000, 0x7FFF)
+			return mmc5_prg_base_mode0 + bit32.band(addr - 0x8000, 0x7FFF)
 		end
 
 		if mmc5_prg_mode == 1 then
 			if addr < 0xC000 then
-				local bank16 = wrapBank(bit32.rshift(mmc5_prg_bank_8k(1), 1), prg_total_16k)
-				return bank16 * 0x4000 + bit32.band(addr - 0x8000, 0x3FFF)
+				return mmc5_prg_base_mode1_low + bit32.band(addr - 0x8000, 0x3FFF)
 			end
 
-			local bank16 = wrapBank(bit32.rshift(mmc5_prg_bank_8k(3), 1), prg_total_16k)
-			return bank16 * 0x4000 + bit32.band(addr, 0x3FFF)
+			return mmc5_prg_base_mode1_high + bit32.band(addr, 0x3FFF)
 		end
 
 		if mmc5_prg_mode == 2 then
 			if addr < 0xC000 then
-				local bank16 = wrapBank(bit32.rshift(mmc5_prg_bank_8k(1), 1), prg_total_16k)
-				return bank16 * 0x4000 + bit32.band(addr - 0x8000, 0x3FFF)
+				return mmc5_prg_base_mode2_low + bit32.band(addr - 0x8000, 0x3FFF)
 			end
 
 			if addr < 0xE000 then
-				return mmc5_prg_bank_8k(2) * 0x2000 + bit32.band(addr, 0x1FFF)
+				return mmc5_prg_base_mode2_mid + bit32.band(addr, 0x1FFF)
 			end
 
-			return mmc5_prg_bank_8k(3) * 0x2000 + bit32.band(addr, 0x1FFF)
+			return mmc5_prg_base_mode2_high + bit32.band(addr, 0x1FFF)
 		end
 
 		local slot = bit32.rshift(addr - 0x8000, 13)
-		return mmc5_prg_bank_8k(slot) * 0x2000 + bit32.band(addr, 0x1FFF)
+		if slot == 0 then
+			return mmc5_prg_base_slot0 + bit32.band(addr, 0x1FFF)
+		end
+		if slot == 1 then
+			return mmc5_prg_base_slot1 + bit32.band(addr, 0x1FFF)
+		end
+		if slot == 2 then
+			return mmc5_prg_base_slot2 + bit32.band(addr, 0x1FFF)
+		end
+		return mmc5_prg_base_slot3 + bit32.band(addr, 0x1FFF)
 	end
 
 	local function map_chr_addr(addr: number, fetch_kind: number?, sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local kind = fetch_kind or 0
 
-		if kind == 1 and mmc5_exram_mode <= 1 and mmc5_in_frame and mmc5_split_enabled() and mmc5_split_in_region then
+		if kind == 1 and mmc5_exram_mode <= 1 and mmc5_in_frame and bit32.btest(mmc5_split_control, 0x80) and mmc5_split_in_region then
 			local split_addr = bit32.lshift(bit32.band(mmc5_split_bank, 0x3F), 12)
 			split_addr += bit32.band(
 				bit32.bor(bit32.band(addr, 0x1FF8), bit32.band(mmc5_split_vertical_scroll, 0x07)),
@@ -988,7 +1198,13 @@ local function MMC5(config: MapperConfig): Mapper
 			return normalizeOffset(split_addr, chr_total_bytes)
 		end
 
-		if mmc5_mode1_chr_override_active(kind) then
+		if kind == 1
+			and mmc5_exram_mode == 1
+			and mmc5_in_frame
+			and (mmc5_split_tile_number < 32 or mmc5_split_tile_number >= 40)
+			and mmc5_exattr_fetch_counter > 0
+			and mmc5_exattr_fetch_counter <= 2
+		then
 			mmc5_exattr_fetch_counter -= 1
 			local ex_attr_addr = bit32.lshift(bit32.band(mmc5_exattr_selected_chr_bank, 0xFF), 12)
 				+ bit32.band(addr, 0x0FFF)
@@ -1007,16 +1223,60 @@ local function MMC5(config: MapperConfig): Mapper
 				use_set_b = true
 			else
 				-- Non-render/unknown fetch context: fall back to last-known MMC5 phase heuristic.
-				use_set_b = not mmc5_chr_uses_set_a(true)
+				use_set_b = not (
+					(mmc5_split_tile_number >= 32 and mmc5_split_tile_number < 40)
+						or ((not mmc5_in_frame) and mmc5_last_chr_reg <= 0x5127)
+				)
 			end
 		end
 
-		local bank_1k = if use_set_b
-			then mmc5_chr_bank_from_set_b(mmc5_chr_mode, segment)
-			else mmc5_chr_bank_from_set_a(mmc5_chr_mode, segment)
+		if use_set_b then
+			if segment == 0 then
+				return mmc5_chr_set_b_base0 + inner
+			end
+			if segment == 1 then
+				return mmc5_chr_set_b_base1 + inner
+			end
+			if segment == 2 then
+				return mmc5_chr_set_b_base2 + inner
+			end
+			if segment == 3 then
+				return mmc5_chr_set_b_base3 + inner
+			end
+			if segment == 4 then
+				return mmc5_chr_set_b_base4 + inner
+			end
+			if segment == 5 then
+				return mmc5_chr_set_b_base5 + inner
+			end
+			if segment == 6 then
+				return mmc5_chr_set_b_base6 + inner
+			end
+			return mmc5_chr_set_b_base7 + inner
+		end
 
-		bank_1k = wrapBank(bank_1k, chr_total_1k)
-		return bank_1k * 0x0400 + inner
+		if segment == 0 then
+			return mmc5_chr_set_a_base0 + inner
+		end
+		if segment == 1 then
+			return mmc5_chr_set_a_base1 + inner
+		end
+		if segment == 2 then
+			return mmc5_chr_set_a_base2 + inner
+		end
+		if segment == 3 then
+			return mmc5_chr_set_a_base3 + inner
+		end
+		if segment == 4 then
+			return mmc5_chr_set_a_base4 + inner
+		end
+		if segment == 5 then
+			return mmc5_chr_set_a_base5 + inner
+		end
+		if segment == 6 then
+			return mmc5_chr_set_a_base6 + inner
+		end
+		return mmc5_chr_set_a_base7 + inner
 	end
 
 	local function write_cpu(addr: number, value: number)
@@ -1040,6 +1300,7 @@ local function MMC5(config: MapperConfig): Mapper
 		end
 		if addr == 0x5101 then
 			mmc5_chr_mode = bit32.band(value, 0x03)
+			recalc_mmc5_chr_slots()
 			return
 		end
 		if addr == 0x5102 then
@@ -1071,10 +1332,12 @@ local function MMC5(config: MapperConfig): Mapper
 		end
 		if addr == 0x5113 then
 			mmc5_prg_ram_bank = bit32.band(value, 0x07)
+			recalc_mmc5_prg_slots()
 			return
 		end
 		if addr >= 0x5114 and addr <= 0x5117 then
 			buffer.writeu8(mmc5_prg_regs, addr - 0x5114, value)
+			recalc_mmc5_prg_slots()
 			return
 		end
 		if addr >= 0x5120 and addr <= 0x5127 then
@@ -1161,23 +1424,23 @@ local function MMC5(config: MapperConfig): Mapper
 		end
 
 		local offset = bit32.band(addr, 0x0FFF)
-		local nt = bit32.band(bit32.rshift(offset, 10), 0x03)
+		local nt = bit32.rshift(offset, 10)
 		local inner = bit32.band(offset, 0x03FF)
 		local source = buffer.readu8(mmc5_nt_map, nt)
 		local is_nt_fetch = inner < 0x03C0
 
 		if mmc5_exram_mode <= 1 and mmc5_in_frame then
-			if mmc5_split_enabled() then
+			if bit32.btest(mmc5_split_control, 0x80) then
 				local split_scanline = if mmc5_split_tile_number >= 41 then mmc5_scanline_counter + 1 else mmc5_scanline_counter
 				mmc5_split_vertical_scroll = (split_scanline + mmc5_split_scroll) % 240
 				local column = (mmc5_split_tile_number + 2) % 42
 
 				if is_nt_fetch then
 					if column == 0 then
-						mmc5_split_in_region = not mmc5_split_right_side()
+						mmc5_split_in_region = not bit32.btest(mmc5_split_control, 0x40)
 					end
 
-					if column == mmc5_split_delimiter_tile() and mmc5_split_tile_number < 42 then
+					if column == bit32.band(mmc5_split_control, 0x1F) and mmc5_split_tile_number < 42 then
 						mmc5_split_in_region = not mmc5_split_in_region
 					elseif column > 32 then
 						mmc5_split_in_region = false
@@ -1253,7 +1516,7 @@ local function MMC5(config: MapperConfig): Mapper
 		end
 
 		local offset = bit32.band(addr, 0x0FFF)
-		local nt = bit32.band(bit32.rshift(offset, 10), 0x03)
+		local nt = bit32.rshift(offset, 10)
 		local inner = bit32.band(offset, 0x03FF)
 		local source = buffer.readu8(mmc5_nt_map, nt)
 		value = bit32.band(value, 0xFF)
@@ -1321,17 +1584,16 @@ local function MMC5(config: MapperConfig): Mapper
 		end
 	end
 
-	local function on_ppu_address(addr: number, scanline: number, cycle: number, rendering: boolean)
-		addr = bit32.band(addr, 0x3FFF)
-		local dots_per_scanline = 341
-		local dots_per_frame = 262 * dots_per_scanline
+	local mmc5_dots_per_scanline = 341
+	local mmc5_dots_per_frame = 262 * mmc5_dots_per_scanline
 
+	local function on_ppu_address(addr: number, scanline: number, cycle: number, rendering: boolean)
 		if mmc5_last_ppu_read_scanline >= 0 and mmc5_last_ppu_read_cycle >= 1 then
-			local prev_dot = mmc5_last_ppu_read_scanline * dots_per_scanline + mmc5_last_ppu_read_cycle
-			local curr_dot = scanline * dots_per_scanline + cycle
+			local prev_dot = mmc5_last_ppu_read_scanline * mmc5_dots_per_scanline + mmc5_last_ppu_read_cycle
+			local curr_dot = scanline * mmc5_dots_per_scanline + cycle
 			local dot_delta = curr_dot - prev_dot
 			if dot_delta < 0 then
-				dot_delta += dots_per_frame
+				dot_delta += mmc5_dots_per_frame
 			end
 
 			-- 3 CPU cycles ~= 9 PPU dots.
@@ -1356,7 +1618,7 @@ local function MMC5(config: MapperConfig): Mapper
 			return
 		end
 
-		if scanline < 0 or (scanline >= 240 and scanline ~= 261) then
+		if scanline >= 240 and scanline ~= 261 then
 			return
 		end
 
@@ -1384,10 +1646,8 @@ local function MMC5(config: MapperConfig): Mapper
 		mmc5_chr_mode = 3
 
 		buffer.fill(mmc5_prg_regs, 0, 0, 4)
-
-		for i = 1, 12 do
-			mmc5_chr_regs[i] = 0
-		end
+		buffer.fill(mmc5_chr_regs, 0, 0, 12 * 2)
+		recalc_mmc5_chr_slots()
 
 		mmc5_chr_high = 0
 		mmc5_last_chr_reg = 0x5120
@@ -1436,6 +1696,7 @@ local function MMC5(config: MapperConfig): Mapper
 		buffer.writeu8(mmc5_prg_regs, 1, 0x80)
 		buffer.writeu8(mmc5_prg_regs, 2, 0x80)
 		buffer.writeu8(mmc5_prg_regs, 3, 0xFF)
+		recalc_mmc5_prg_slots()
 
 		update_mmc5_simple_mirroring()
 	end
@@ -1546,14 +1807,33 @@ local function MMC2(config: MapperConfig): Mapper
 	local mirroring = config.initialMirroring
 
 	local prg_bank = 0
+	local prg_base_8000 = 0
+	local prg_base_A000 = wrapBank(prg_total_8k - 3, prg_total_8k) * 0x2000
+	local prg_base_C000 = wrapBank(prg_total_8k - 2, prg_total_8k) * 0x2000
+	local prg_base_E000 = wrapBank(prg_total_8k - 1, prg_total_8k) * 0x2000
+
 	local chr_fd_0 = 0
 	local chr_fe_0 = 0
 	local chr_fd_1 = 0
 	local chr_fe_1 = 0
+	local chr_fd_0_base = 0
+	local chr_fe_0_base = 0
+	local chr_fd_1_base = 0
+	local chr_fe_1_base = 0
+
 	local latch0_fe = false
 	local latch1_fe = false
-	local latch0_pending = 0
-	local latch1_pending = 0
+
+	local function recalc_prg_base_8000()
+		prg_base_8000 = wrapBank(prg_bank, prg_total_8k) * 0x2000
+	end
+
+	local function recalc_chr_bases()
+		chr_fd_0_base = wrapBank(chr_fd_0, chr_total_4k) * 0x1000
+		chr_fe_0_base = wrapBank(chr_fe_0, chr_total_4k) * 0x1000
+		chr_fd_1_base = wrapBank(chr_fd_1, chr_total_4k) * 0x1000
+		chr_fe_1_base = wrapBank(chr_fe_1, chr_total_4k) * 0x1000
+	end
 
 	local function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
@@ -1561,42 +1841,39 @@ local function MMC2(config: MapperConfig): Mapper
 			return 0
 		end
 
-		local bank = 0
 		if addr < 0xA000 then
-			bank = wrapBank(prg_bank, prg_total_8k)
-		elseif addr < 0xC000 then
-			bank = wrapBank(prg_total_8k - 3, prg_total_8k)
-		elseif addr < 0xE000 then
-			bank = wrapBank(prg_total_8k - 2, prg_total_8k)
-		else
-			bank = wrapBank(prg_total_8k - 1, prg_total_8k)
+			return prg_base_8000 + bit32.band(addr, 0x1FFF)
 		end
-
-		return bank * 0x2000 + bit32.band(addr, 0x1FFF)
+		if addr < 0xC000 then
+			return prg_base_A000 + bit32.band(addr, 0x1FFF)
+		end
+		if addr < 0xE000 then
+			return prg_base_C000 + bit32.band(addr, 0x1FFF)
+		end
+		return prg_base_E000 + bit32.band(addr, 0x1FFF)
 	end
 
 	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
-		local bank4 = 0
+		local mapped_base = 0
 
 		if addr < 0x1000 then
-			bank4 = if latch0_fe then chr_fe_0 else chr_fd_0
+			mapped_base = if latch0_fe then chr_fe_0_base else chr_fd_0_base
 		else
-			bank4 = if latch1_fe then chr_fe_1 else chr_fd_1
+			mapped_base = if latch1_fe then chr_fe_1_base else chr_fd_1_base
 		end
 
-		bank4 = wrapBank(bank4, chr_total_4k)
-		local mapped = bank4 * 0x1000 + bit32.band(addr, 0x0FFF)
+		local mapped = mapped_base + bit32.band(addr, 0x0FFF)
 
-		-- onPpuAddress is called before CHR read in this core.
 		-- Apply latch updates after mapping so the triggering fetch still uses the old bank.
-		if latch0_pending ~= 0 then
-			latch0_fe = latch0_pending == 2
-			latch0_pending = 0
-		end
-		if latch1_pending ~= 0 then
-			latch1_fe = latch1_pending == 2
-			latch1_pending = 0
+		if addr == 0x0FD8 then
+			latch0_fe = false
+		elseif addr == 0x0FE8 then
+			latch0_fe = true
+		elseif addr >= 0x1FD8 and addr <= 0x1FDF then
+			latch1_fe = false
+		elseif addr >= 0x1FE8 and addr <= 0x1FEF then
+			latch1_fe = true
 		end
 
 		return mapped
@@ -1611,30 +1888,21 @@ local function MMC2(config: MapperConfig): Mapper
 
 		if addr < 0xB000 then
 			prg_bank = bit32.band(value, 0x0F)
+			recalc_prg_base_8000()
 		elseif addr < 0xC000 then
 			chr_fd_0 = bit32.band(value, 0x1F)
+			chr_fd_0_base = wrapBank(chr_fd_0, chr_total_4k) * 0x1000
 		elseif addr < 0xD000 then
 			chr_fe_0 = bit32.band(value, 0x1F)
+			chr_fe_0_base = wrapBank(chr_fe_0, chr_total_4k) * 0x1000
 		elseif addr < 0xE000 then
 			chr_fd_1 = bit32.band(value, 0x1F)
+			chr_fd_1_base = wrapBank(chr_fd_1, chr_total_4k) * 0x1000
 		elseif addr < 0xF000 then
 			chr_fe_1 = bit32.band(value, 0x1F)
+			chr_fe_1_base = wrapBank(chr_fe_1, chr_total_4k) * 0x1000
 		elseif not config.fourScreen then
 			mirroring = if bit32.band(value, 0x01) == 0 then Mirroring.VERTICAL else Mirroring.HORIZONTAL
-		end
-	end
-
-	local function on_ppu_address(addr: number, _scanline: number, _cycle: number, _rendering: boolean)
-		addr = bit32.band(addr, 0x1FFF)
-
-		if addr == 0x0FD8 then
-			latch0_pending = 1
-		elseif addr == 0x0FE8 then
-			latch0_pending = 2
-		elseif addr >= 0x1FD8 and addr <= 0x1FDF then
-			latch1_pending = 1
-		elseif addr >= 0x1FE8 and addr <= 0x1FEF then
-			latch1_pending = 2
 		end
 	end
 
@@ -1645,10 +1913,10 @@ local function MMC2(config: MapperConfig): Mapper
 		chr_fe_0 = 0
 		chr_fd_1 = 0
 		chr_fe_1 = 0
+		recalc_prg_base_8000()
+		recalc_chr_bases()
 		latch0_fe = false
 		latch1_fe = false
-		latch0_pending = 0
-		latch1_pending = 0
 	end
 
 	reset_mapper()
@@ -1663,7 +1931,7 @@ local function MMC2(config: MapperConfig): Mapper
 		mapPrgRamAddr = nil,
 		clockA12 = nil,
 		clockScanline = nil,
-		onPpuAddress = on_ppu_address,
+		onPpuAddress = nil,
 		reset = reset_mapper,
 		irqPending = function(): boolean
 			return false
@@ -1690,14 +1958,31 @@ local function MMC4(config: MapperConfig): Mapper
 	local mirroring = config.initialMirroring
 
 	local prg_bank = 0
+	local prg_base_8000 = 0
+	local prg_base_C000 = wrapBank(prg_total_16k - 1, prg_total_16k) * 0x4000
+
 	local chr_fd_0 = 0
 	local chr_fe_0 = 0
 	local chr_fd_1 = 0
 	local chr_fe_1 = 0
+	local chr_fd_0_base = 0
+	local chr_fe_0_base = 0
+	local chr_fd_1_base = 0
+	local chr_fe_1_base = 0
+
 	local latch0_fe = false
 	local latch1_fe = false
-	local latch0_pending = 0
-	local latch1_pending = 0
+
+	local function recalc_prg_base_8000()
+		prg_base_8000 = wrapBank(prg_bank, prg_total_16k) * 0x4000
+	end
+
+	local function recalc_chr_bases()
+		chr_fd_0_base = wrapBank(chr_fd_0, chr_total_4k) * 0x1000
+		chr_fe_0_base = wrapBank(chr_fe_0, chr_total_4k) * 0x1000
+		chr_fd_1_base = wrapBank(chr_fd_1, chr_total_4k) * 0x1000
+		chr_fe_1_base = wrapBank(chr_fe_1, chr_total_4k) * 0x1000
+	end
 
 	local function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
@@ -1705,38 +1990,34 @@ local function MMC4(config: MapperConfig): Mapper
 			return 0
 		end
 
-		local bank16 = 0
 		if addr < 0xC000 then
-			bank16 = wrapBank(prg_bank, prg_total_16k)
-		else
-			bank16 = wrapBank(prg_total_16k - 1, prg_total_16k)
+			return prg_base_8000 + bit32.band(addr, 0x3FFF)
 		end
 
-		return bank16 * 0x4000 + bit32.band(addr, 0x3FFF)
+		return prg_base_C000 + bit32.band(addr, 0x3FFF)
 	end
 
 	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
-		local bank4 = 0
+		local mapped_base = 0
 
 		if addr < 0x1000 then
-			bank4 = if latch0_fe then chr_fe_0 else chr_fd_0
+			mapped_base = if latch0_fe then chr_fe_0_base else chr_fd_0_base
 		else
-			bank4 = if latch1_fe then chr_fe_1 else chr_fd_1
+			mapped_base = if latch1_fe then chr_fe_1_base else chr_fd_1_base
 		end
 
-		bank4 = wrapBank(bank4, chr_total_4k)
-		local mapped = bank4 * 0x1000 + bit32.band(addr, 0x0FFF)
+		local mapped = mapped_base + bit32.band(addr, 0x0FFF)
 
-		-- onPpuAddress is called before CHR read in this core.
 		-- Apply latch updates after mapping so the triggering fetch still uses the old bank.
-		if latch0_pending ~= 0 then
-			latch0_fe = latch0_pending == 2
-			latch0_pending = 0
-		end
-		if latch1_pending ~= 0 then
-			latch1_fe = latch1_pending == 2
-			latch1_pending = 0
+		if addr >= 0x0FD8 and addr <= 0x0FDF then
+			latch0_fe = false
+		elseif addr >= 0x0FE8 and addr <= 0x0FEF then
+			latch0_fe = true
+		elseif addr >= 0x1FD8 and addr <= 0x1FDF then
+			latch1_fe = false
+		elseif addr >= 0x1FE8 and addr <= 0x1FEF then
+			latch1_fe = true
 		end
 
 		return mapped
@@ -1764,30 +2045,21 @@ local function MMC4(config: MapperConfig): Mapper
 
 		if addr < 0xB000 then
 			prg_bank = bit32.band(value, 0x0F)
+			recalc_prg_base_8000()
 		elseif addr < 0xC000 then
 			chr_fd_0 = bit32.band(value, 0x1F)
+			chr_fd_0_base = wrapBank(chr_fd_0, chr_total_4k) * 0x1000
 		elseif addr < 0xD000 then
 			chr_fe_0 = bit32.band(value, 0x1F)
+			chr_fe_0_base = wrapBank(chr_fe_0, chr_total_4k) * 0x1000
 		elseif addr < 0xE000 then
 			chr_fd_1 = bit32.band(value, 0x1F)
+			chr_fd_1_base = wrapBank(chr_fd_1, chr_total_4k) * 0x1000
 		elseif addr < 0xF000 then
 			chr_fe_1 = bit32.band(value, 0x1F)
+			chr_fe_1_base = wrapBank(chr_fe_1, chr_total_4k) * 0x1000
 		elseif not config.fourScreen then
 			mirroring = if bit32.band(value, 0x01) == 0 then Mirroring.VERTICAL else Mirroring.HORIZONTAL
-		end
-	end
-
-	local function on_ppu_address(addr: number, _scanline: number, _cycle: number, _rendering: boolean)
-		addr = bit32.band(addr, 0x1FFF)
-
-		if addr >= 0x0FD8 and addr <= 0x0FDF then
-			latch0_pending = 1
-		elseif addr >= 0x0FE8 and addr <= 0x0FEF then
-			latch0_pending = 2
-		elseif addr >= 0x1FD8 and addr <= 0x1FDF then
-			latch1_pending = 1
-		elseif addr >= 0x1FE8 and addr <= 0x1FEF then
-			latch1_pending = 2
 		end
 	end
 
@@ -1798,10 +2070,10 @@ local function MMC4(config: MapperConfig): Mapper
 		chr_fe_0 = 0
 		chr_fd_1 = 0
 		chr_fe_1 = 0
+		recalc_prg_base_8000()
+		recalc_chr_bases()
 		latch0_fe = false
 		latch1_fe = false
-		latch0_pending = 0
-		latch1_pending = 0
 	end
 
 	reset_mapper()
@@ -1816,7 +2088,7 @@ local function MMC4(config: MapperConfig): Mapper
 		mapPrgRamAddr = map_prg_ram_addr,
 		clockA12 = nil,
 		clockScanline = nil,
-		onPpuAddress = on_ppu_address,
+		onPpuAddress = nil,
 		reset = reset_mapper,
 		irqPending = function(): boolean
 			return false
@@ -1998,11 +2270,33 @@ local function FME7(config: MapperConfig): Mapper
 	local mirroring = config.initialMirroring
 
 	local command = 0
-	local chr_regs = table.create(8, 0)
+	local chr_reg0 = 0
+	local chr_reg1 = 0
+	local chr_reg2 = 0
+	local chr_reg3 = 0
+	local chr_reg4 = 0
+	local chr_reg5 = 0
+	local chr_reg6 = 0
+	local chr_reg7 = 0
+	local chr_base0 = 0
+	local chr_base1 = 0
+	local chr_base2 = 0
+	local chr_base3 = 0
+	local chr_base4 = 0
+	local chr_base5 = 0
+	local chr_base6 = 0
+	local chr_base7 = 0
+
 	local prg_bank_8000 = 0
 	local prg_bank_A000 = 1
 	local prg_bank_C000 = 2
+	local prg_base_8000 = 0
+	local prg_base_A000 = 0
+	local prg_base_C000 = 0
+	local prg_base_E000 = (prg_total_8k - 1) * 0x2000
+
 	local prg_ram_bank = 0
+	local prg_6000_rom_base = 0
 	local prg_ram_enabled = false
 	local prg_ram_mapped = false
 
@@ -2011,12 +2305,32 @@ local function FME7(config: MapperConfig): Mapper
 	local irq_counter_enabled = false
 	local irq_pending = false
 
+	local function recalc_prg_bases()
+		prg_base_8000 = wrapBank(prg_bank_8000, prg_total_8k) * 0x2000
+		prg_base_A000 = wrapBank(prg_bank_A000, prg_total_8k) * 0x2000
+		prg_base_C000 = wrapBank(prg_bank_C000, prg_total_8k) * 0x2000
+	end
+
+	local function recalc_chr_bases()
+		chr_base0 = wrapBank(chr_reg0, chr_total_1k) * 0x0400
+		chr_base1 = wrapBank(chr_reg1, chr_total_1k) * 0x0400
+		chr_base2 = wrapBank(chr_reg2, chr_total_1k) * 0x0400
+		chr_base3 = wrapBank(chr_reg3, chr_total_1k) * 0x0400
+		chr_base4 = wrapBank(chr_reg4, chr_total_1k) * 0x0400
+		chr_base5 = wrapBank(chr_reg5, chr_total_1k) * 0x0400
+		chr_base6 = wrapBank(chr_reg6, chr_total_1k) * 0x0400
+		chr_base7 = wrapBank(chr_reg7, chr_total_1k) * 0x0400
+	end
+
+	local function recalc_prg_6000_base()
+		prg_6000_rom_base = wrapBank(prg_ram_bank, prg_total_8k) * 0x2000
+	end
+
 	local function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr >= 0x6000 and addr < 0x8000 then
 			if not prg_ram_mapped then
-				local bank = wrapBank(prg_ram_bank, prg_total_8k)
-				return bank * 0x2000 + bit32.band(addr, 0x1FFF)
+				return prg_6000_rom_base + bit32.band(addr, 0x1FFF)
 			end
 			return -1
 		end
@@ -2025,25 +2339,43 @@ local function FME7(config: MapperConfig): Mapper
 			return -1
 		end
 
-		local bank = 0
 		if addr < 0xA000 then
-			bank = wrapBank(prg_bank_8000, prg_total_8k)
-		elseif addr < 0xC000 then
-			bank = wrapBank(prg_bank_A000, prg_total_8k)
-		elseif addr < 0xE000 then
-			bank = wrapBank(prg_bank_C000, prg_total_8k)
-		else
-			bank = wrapBank(prg_total_8k - 1, prg_total_8k)
+			return prg_base_8000 + bit32.band(addr, 0x1FFF)
 		end
-
-		return bank * 0x2000 + bit32.band(addr, 0x1FFF)
+		if addr < 0xC000 then
+			return prg_base_A000 + bit32.band(addr, 0x1FFF)
+		end
+		if addr < 0xE000 then
+			return prg_base_C000 + bit32.band(addr, 0x1FFF)
+		end
+		return prg_base_E000 + bit32.band(addr, 0x1FFF)
 	end
 
 	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local segment = bit32.rshift(addr, 10)
-		local bank = wrapBank(chr_regs[segment + 1], chr_total_1k)
-		return bank * 0x0400 + bit32.band(addr, 0x03FF)
+		if segment == 0 then
+			return chr_base0 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 1 then
+			return chr_base1 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 2 then
+			return chr_base2 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 3 then
+			return chr_base3 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 4 then
+			return chr_base4 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 5 then
+			return chr_base5 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 6 then
+			return chr_base6 + bit32.band(addr, 0x03FF)
+		end
+		return chr_base7 + bit32.band(addr, 0x03FF)
 	end
 
 	local function map_prg_ram_addr(addr: number): number?
@@ -2078,17 +2410,45 @@ local function FME7(config: MapperConfig): Mapper
 		end
 
 		if command <= 0x07 then
-			chr_regs[command + 1] = value
+			if command == 0 then
+				chr_reg0 = value
+				chr_base0 = wrapBank(value, chr_total_1k) * 0x0400
+			elseif command == 1 then
+				chr_reg1 = value
+				chr_base1 = wrapBank(value, chr_total_1k) * 0x0400
+			elseif command == 2 then
+				chr_reg2 = value
+				chr_base2 = wrapBank(value, chr_total_1k) * 0x0400
+			elseif command == 3 then
+				chr_reg3 = value
+				chr_base3 = wrapBank(value, chr_total_1k) * 0x0400
+			elseif command == 4 then
+				chr_reg4 = value
+				chr_base4 = wrapBank(value, chr_total_1k) * 0x0400
+			elseif command == 5 then
+				chr_reg5 = value
+				chr_base5 = wrapBank(value, chr_total_1k) * 0x0400
+			elseif command == 6 then
+				chr_reg6 = value
+				chr_base6 = wrapBank(value, chr_total_1k) * 0x0400
+			else
+				chr_reg7 = value
+				chr_base7 = wrapBank(value, chr_total_1k) * 0x0400
+			end
 		elseif command == 0x08 then
 			prg_ram_enabled = bit32.btest(value, 0x80)
 			prg_ram_mapped = bit32.btest(value, 0x40)
 			prg_ram_bank = bit32.band(value, 0x3F)
+			recalc_prg_6000_base()
 		elseif command == 0x09 then
 			prg_bank_8000 = value
+			prg_base_8000 = wrapBank(value, prg_total_8k) * 0x2000
 		elseif command == 0x0A then
 			prg_bank_A000 = value
+			prg_base_A000 = wrapBank(value, prg_total_8k) * 0x2000
 		elseif command == 0x0B then
 			prg_bank_C000 = value
+			prg_base_C000 = wrapBank(value, prg_total_8k) * 0x2000
 		elseif command == 0x0C then
 			if not four_screen then
 				local mode = bit32.band(value, 0x03)
@@ -2134,13 +2494,23 @@ local function FME7(config: MapperConfig): Mapper
 	local function reset_mapper()
 		mirroring = config.initialMirroring
 		command = 0
-		for i = 1, 8 do
-			chr_regs[i] = 0
-		end
+		chr_reg0 = 0
+		chr_reg1 = 0
+		chr_reg2 = 0
+		chr_reg3 = 0
+		chr_reg4 = 0
+		chr_reg5 = 0
+		chr_reg6 = 0
+		chr_reg7 = 0
+		recalc_chr_bases()
+
 		prg_bank_8000 = 0
 		prg_bank_A000 = 1
 		prg_bank_C000 = 2
+		recalc_prg_bases()
+
 		prg_ram_bank = 0
+		recalc_prg_6000_base()
 		prg_ram_enabled = false
 		prg_ram_mapped = false
 		irq_counter = 0
@@ -2333,38 +2703,57 @@ local function DxROM(config: MapperConfig): Mapper
 	local mirroring = config.initialMirroring
 
 	local bank_select = 0
-	local regs = table.create(8, 0)
-	local prg_slots = table.create(4, 0)
-	local chr_slots = table.create(8, 0)
+	local reg0 = 0
+	local reg1 = 0
+	local reg2 = 0
+	local reg3 = 0
+	local reg4 = 0
+	local reg5 = 0
+	local reg6 = 0
+	local reg7 = 0
+
+	local prg_base0 = 0
+	local prg_base1 = 0
+	local prg_base2 = 0
+	local prg_base3 = 0
+
+	local chr_base0 = 0
+	local chr_base1 = 0
+	local chr_base2 = 0
+	local chr_base3 = 0
+	local chr_base4 = 0
+	local chr_base5 = 0
+	local chr_base6 = 0
+	local chr_base7 = 0
 
 	local function recalc_prg_slots()
-		local r6 = wrapBank(regs[7], prg_total_8k)
-		local r7 = wrapBank(regs[8], prg_total_8k)
+		local r6 = wrapBank(reg6, prg_total_8k)
+		local r7 = wrapBank(reg7, prg_total_8k)
 		local last = math.max(prg_total_8k - 1, 0)
 		local second_last = math.max(prg_total_8k - 2, 0)
 
-		prg_slots[1] = r6
-		prg_slots[2] = r7
-		prg_slots[3] = second_last
-		prg_slots[4] = last
+		prg_base0 = r6 * 0x2000
+		prg_base1 = r7 * 0x2000
+		prg_base2 = second_last * 0x2000
+		prg_base3 = last * 0x2000
 	end
 
 	local function recalc_chr_slots()
-		local r0 = bit32.band(regs[1], 0x3F)
-		local r1 = bit32.band(regs[2], 0x3F)
-		local r2 = bit32.band(regs[3], 0x3F)
-		local r3 = bit32.band(regs[4], 0x3F)
-		local r4 = bit32.band(regs[5], 0x3F)
-		local r5 = bit32.band(regs[6], 0x3F)
+		local r0 = bit32.band(reg0, 0x3F)
+		local r1 = bit32.band(reg1, 0x3F)
+		local r2 = bit32.band(reg2, 0x3F)
+		local r3 = bit32.band(reg3, 0x3F)
+		local r4 = bit32.band(reg4, 0x3F)
+		local r5 = bit32.band(reg5, 0x3F)
 
-		chr_slots[1] = wrapBank(bit32.band(r0, 0xFE), chr_total_1k)
-		chr_slots[2] = wrapBank(bit32.band(r0, 0xFE) + 1, chr_total_1k)
-		chr_slots[3] = wrapBank(bit32.band(r1, 0xFE), chr_total_1k)
-		chr_slots[4] = wrapBank(bit32.band(r1, 0xFE) + 1, chr_total_1k)
-		chr_slots[5] = wrapBank(r2, chr_total_1k)
-		chr_slots[6] = wrapBank(r3, chr_total_1k)
-		chr_slots[7] = wrapBank(r4, chr_total_1k)
-		chr_slots[8] = wrapBank(r5, chr_total_1k)
+		chr_base0 = wrapBank(bit32.band(r0, 0xFE), chr_total_1k) * 0x0400
+		chr_base1 = wrapBank(bit32.band(r0, 0xFE) + 1, chr_total_1k) * 0x0400
+		chr_base2 = wrapBank(bit32.band(r1, 0xFE), chr_total_1k) * 0x0400
+		chr_base3 = wrapBank(bit32.band(r1, 0xFE) + 1, chr_total_1k) * 0x0400
+		chr_base4 = wrapBank(r2, chr_total_1k) * 0x0400
+		chr_base5 = wrapBank(r3, chr_total_1k) * 0x0400
+		chr_base6 = wrapBank(r4, chr_total_1k) * 0x0400
+		chr_base7 = wrapBank(r5, chr_total_1k) * 0x0400
 	end
 
 	local function map_prg_addr(addr: number): number
@@ -2374,13 +2763,43 @@ local function DxROM(config: MapperConfig): Mapper
 		end
 
 		local slot = bit32.rshift(addr - 0x8000, 13)
-		return prg_slots[slot + 1] * 0x2000 + bit32.band(addr, 0x1FFF)
+		if slot == 0 then
+			return prg_base0 + bit32.band(addr, 0x1FFF)
+		end
+		if slot == 1 then
+			return prg_base1 + bit32.band(addr, 0x1FFF)
+		end
+		if slot == 2 then
+			return prg_base2 + bit32.band(addr, 0x1FFF)
+		end
+		return prg_base3 + bit32.band(addr, 0x1FFF)
 	end
 
 	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local segment = bit32.rshift(addr, 10)
-		return chr_slots[segment + 1] * 0x0400 + bit32.band(addr, 0x03FF)
+		if segment == 0 then
+			return chr_base0 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 1 then
+			return chr_base1 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 2 then
+			return chr_base2 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 3 then
+			return chr_base3 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 4 then
+			return chr_base4 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 5 then
+			return chr_base5 + bit32.band(addr, 0x03FF)
+		end
+		if segment == 6 then
+			return chr_base6 + bit32.band(addr, 0x03FF)
+		end
+		return chr_base7 + bit32.band(addr, 0x03FF)
 	end
 
 	local function map_prg_ram_addr(addr: number): number?
@@ -2407,10 +2826,29 @@ local function DxROM(config: MapperConfig): Mapper
 			if bit32.band(addr, 1) == 0 then
 				bank_select = bit32.band(value, 0x07)
 			else
-				regs[bank_select + 1] = value
-				if bank_select <= 5 then
+				if bank_select == 0 then
+					reg0 = value
 					recalc_chr_slots()
+				elseif bank_select == 1 then
+					reg1 = value
+					recalc_chr_slots()
+				elseif bank_select == 2 then
+					reg2 = value
+					recalc_chr_slots()
+				elseif bank_select == 3 then
+					reg3 = value
+					recalc_chr_slots()
+				elseif bank_select == 4 then
+					reg4 = value
+					recalc_chr_slots()
+				elseif bank_select == 5 then
+					reg5 = value
+					recalc_chr_slots()
+				elseif bank_select == 6 then
+					reg6 = value
+					recalc_prg_slots()
 				else
+					reg7 = value
 					recalc_prg_slots()
 				end
 			end
@@ -2420,9 +2858,14 @@ local function DxROM(config: MapperConfig): Mapper
 	local function reset_mapper()
 		mirroring = config.initialMirroring
 		bank_select = 0
-		for i = 1, 8 do
-			regs[i] = 0
-		end
+		reg0 = 0
+		reg1 = 0
+		reg2 = 0
+		reg3 = 0
+		reg4 = 0
+		reg5 = 0
+		reg6 = 0
+		reg7 = 0
 		recalc_prg_slots()
 		recalc_chr_slots()
 	end
