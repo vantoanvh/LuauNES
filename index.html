@@ -6,16 +6,18 @@
   <title>File to RBXMX</title>
   <style>
     :root {
-      --bg-a: #0b0f16;
-      --bg-b: #101827;
-      --panel: rgba(24, 30, 43, 0.86);
-      --surface: rgba(12, 17, 27, 0.78);
-      --text: #eef2fa;
-      --muted: #a6afc2;
-      --border: rgba(255, 255, 255, 0.1);
-      --accent: #83b9ff;
-      --accent-strong: #9cc8ff;
-      --shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+      --bg: #050505;
+      --panel: #0d0d0d;
+      --surface: #121212;
+      --surface-hover: #181818;
+      --text: #f2f2f2;
+      --muted: #8a8a8a;
+      --border: #242424;
+      --border-strong: #343434;
+      --accent: #5a5a5a;
+      --accent-hover: #6a6a6a;
+      --focus: #3a3a3a;
+      --shadow: #000000;
     }
 
     * {
@@ -27,9 +29,7 @@
       min-height: 100vh;
       display: grid;
       place-items: center;
-      background:
-        radial-gradient(1000px 600px at 15% 0%, #1a2438 0%, transparent 55%),
-        linear-gradient(160deg, var(--bg-a) 0%, var(--bg-b) 100%);
+      background: var(--bg);
       color: var(--text);
       font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
       padding: 16px;
@@ -42,9 +42,7 @@
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 16px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 18px 42px 0 var(--shadow);
     }
 
     .title {
@@ -90,19 +88,19 @@
     }
 
     button.primary {
-      background: rgba(131, 185, 255, 0.2);
-      border-color: rgba(131, 185, 255, 0.45);
-      color: var(--accent-strong);
+      background: var(--accent);
+      border-color: var(--border-strong);
+      color: var(--text);
     }
 
     button:hover {
-      border-color: rgba(255, 255, 255, 0.22);
-      background: rgba(255, 255, 255, 0.05);
+      border-color: var(--border-strong);
+      background: var(--surface-hover);
     }
 
     button.primary:hover {
-      border-color: rgba(156, 200, 255, 0.72);
-      background: rgba(131, 185, 255, 0.28);
+      border-color: #4a4a4a;
+      background: var(--accent-hover);
     }
 
     textarea {
@@ -122,8 +120,8 @@
     input[type="file"]:focus-visible,
     button:focus-visible,
     textarea:focus-visible {
-      border-color: rgba(131, 185, 255, 0.8);
-      box-shadow: 0 0 0 3px rgba(131, 185, 255, 0.16);
+      border-color: var(--border-strong);
+      box-shadow: 0 0 0 3px var(--focus);
     }
 
     .hint {
@@ -144,8 +142,8 @@
       <button id="exportBtn" class="primary" type="button">Export .rbxmx</button>
     </div>
 
-    <textarea id="clipboardBox" spellcheck="false" placeholder="--// name.extension&#10;&#10;return \"\\0\\1\\23...\""></textarea>
-    <p class="hint">Upload a file to generate editable text. Export uses this box exactly inside Source CDATA.</p>
+    <textarea id="clipboardBox" spellcheck="false" placeholder="--// name.extension&#10;&#10;return &quot;\0\12\42\255\23&quot;"></textarea>
+    <p class="hint">Upload a file to generate editable text. Every byte is written as a numeric Lua escape.</p>
   </main>
 
   <script>
@@ -154,47 +152,13 @@
     const copyBtn = document.getElementById("copyBtn");
     const exportBtn = document.getElementById("exportBtn");
     const MAX_FILE_BYTES = 10 * 1024 * 1024;
-    const SHORT_ESCAPE_BY_BYTE = {
-      7: "a",
-      8: "b",
-      9: "t",
-      10: "n",
-      11: "v",
-      12: "f",
-      13: "r"
-    };
 
     function bytesToLuaEscapedString(bytes) {
-      const parts = [];
-      let previousWasNumericEscape = false;
-
+      let result = "";
       for (const b of bytes) {
-        if (b === 34 || b === 92) {
-          parts.push("\\" + String.fromCharCode(b));
-          previousWasNumericEscape = false;
-          continue;
-        }
-
-        const shortEscape = SHORT_ESCAPE_BY_BYTE[b];
-        if (shortEscape) {
-          parts.push("\\" + shortEscape);
-          previousWasNumericEscape = false;
-          continue;
-        }
-
-        const isPrintableAscii = b >= 32 && b <= 126;
-        const isAsciiDigit = b >= 48 && b <= 57;
-        if (isPrintableAscii && !(previousWasNumericEscape && isAsciiDigit)) {
-          parts.push(String.fromCharCode(b));
-          previousWasNumericEscape = false;
-          continue;
-        }
-
-        parts.push("\\" + String(b));
-        previousWasNumericEscape = true;
+        result += "\\" + String(b);
       }
-
-      return parts.join("");
+      return result;
     }
 
     function toClipboardText(fileName, bytes) {
@@ -203,7 +167,6 @@
     }
 
     function cdataSafe(text) {
-      // Split any CDATA close token so generated XML stays valid.
       return text.replaceAll("]]>", "]]]]><![CDATA[>");
     }
 
@@ -242,10 +205,14 @@
       try {
         await navigator.clipboard.writeText(clipboardBox.value);
         copyBtn.textContent = "Copied";
-        setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+        setTimeout(() => {
+          copyBtn.textContent = "Copy";
+        }, 1200);
       } catch {
         copyBtn.textContent = "Copy failed";
-        setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+        setTimeout(() => {
+          copyBtn.textContent = "Copy";
+        }, 1200);
       }
     });
 
