@@ -106,7 +106,7 @@ or testing pregenerated roms in [test](https://github.com/vantoanvh/LuauNES/tree
 local UserInputService = game:GetService'UserInputService'
 local AssetService = game:GetService'AssetService'
 local RunService = game:GetService'RunService'
-local GuiService = game:GetService("GuiService")
+local GuiService = game:GetService'GuiService'
 
 -- Import the LuauNES module.
 local LuauNES = require'@game/ReplicatedStorage/Shared/LuauNES'
