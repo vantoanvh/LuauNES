@@ -22,7 +22,6 @@ The audio files you can download in the [Sounds](https://github.com/vantoanvh/Lu
 - **zapper support ( in other word, mouse ).**
 - Fully 32 noises sequences ( 16 long noises, 16 short noises ), 4 unique Pulses, 4 MMC5/VRC6 pulses, Traingle, and other more. Make this become the most "sound"-accurate.
 - PPU dot-based ( 3 PPU per 1 CPU cycles )
-- Fixes alot of edge cases that **LuaNES** didn't fixed yet.
 - cycle-accurate CPU.
 
 # Supported Mappers:
