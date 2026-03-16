@@ -1,6 +1,6 @@
 # LuauNES, The fastest and most accurate NES emulator in roblox.
 
-![Ver](https://img.shields.io/badge/version-v1.5.0-blue?style=plastic)
+![Ver](https://img.shields.io/badge/version-v1.5.1-blue?style=plastic)
 [![License](https://img.shields.io/badge/license-MIT-97ca00?style=plastic)](https://github.com/vantoanvh/LuauParser/blob/main/LICENSE)
 [![Release](https://img.shields.io/badge/release-latest-darkblue?style=plastic)](https://github.com/vantoanvh/LuauNES/releases/latest)
 
@@ -18,11 +18,12 @@ The audio files you can download in the [Sounds](https://github.com/vantoanvh/Lu
 
 ## Features
 
-- **2-player support.**
-- **zapper support ( in other word, mouse ).**
-- Fully 32 noises sequences ( 16 long noises, 16 short noises ), 4 unique Pulses, 4 MMC5/VRC6 pulses, Traingle, and other more. Make this become the most "sound"-accurate.
-- PPU dot-based ( 3 PPU per 1 CPU cycles )
-- cycle-accurate CPU.
+- 2-player support.
+- zapper support ( or mouse ).
+- Full noises sequences, pulses (with extra ones), triangles for sounds.
+- PPU dot-based
+- Almost cycle-accurate CPU
+- No DMC channels (sorry!)
 
 # Supported Mappers:
 
