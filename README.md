@@ -1,7 +1,7 @@
 # LuauNES, The fastest and most accurate NES emulator in roblox.
 
 ![Ver](https://img.shields.io/badge/version-v1.5.1-blue?style=plastic)
-[![License](https://img.shields.io/badge/license-MIT-97ca00?style=plastic)](https://github.com/vantoanvh/LuauParser/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-97ca00?style=plastic)](https://github.com/vantoanvh/LuauNES/blob/main/LICENSE)
 [![Release](https://img.shields.io/badge/release-latest-darkblue?style=plastic)](https://github.com/vantoanvh/LuauNES/releases/latest)
 
 **NES** emulator ported to roblox luau inspired/based on **[Mesen2](https://github.com/SourMesen/Mesen2/tree/master)** ( one of the most accurate nes emulators )<br><br>
