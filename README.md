@@ -1,4 +1,4 @@
-# LuauNES, The fastest and most accurate NES emulator in roblox.
+# LuauNES, The fastest NES emulator in roblox.
 
 ![Ver](https://img.shields.io/badge/version-v1.5.1-blue?style=plastic)
 [![License](https://img.shields.io/badge/license-MIT-97ca00?style=plastic)](https://github.com/vantoanvh/LuauNES/blob/main/LICENSE)
