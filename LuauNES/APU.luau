@@ -371,6 +371,47 @@ return function(dmc_reader: (number) -> number): APUInstance
 		extra_pulse2_duty4_sound = nil
 	end
 
+	local function ensure_vrc6_saw_sound()
+		if vrc6_saw_sound == nil then
+			vrc6_saw_sound = create_looped_sound('VRC6_Saw', 'triangle', nil)
+		end
+	end
+
+	local function release_vrc6_saw_sound()
+		if vrc6_saw_sound ~= nil then
+			vrc6_saw_sound:Destroy()
+			vrc6_saw_sound = nil
+		end
+	end
+
+	local function ensure_vrc7_voice_sounds()
+		if vrc7_voice_sound_bank ~= nil then
+			return
+		end
+
+		local voice_bank = {} :: {{Sound}}
+		for channel = 1, 6 do
+			local bank = {} :: {Sound}
+			local prefix = `VRC7_{channel}`
+			for wave = 1, #VOICE_ASSET_KEYS do
+				bank[wave] = create_looped_sound(prefix .. '_' .. wave, VOICE_ASSET_KEYS[wave], nil)
+			end
+			voice_bank[channel] = bank
+		end
+		vrc7_voice_sound_bank = voice_bank
+	end
+
+	local function release_vrc7_voice_sounds()
+		if vrc7_voice_sound_bank == nil then
+			return
+		end
+
+		for _, bank in vrc7_voice_sound_bank do
+			destroy_sound_bank(bank)
+		end
+		vrc7_voice_sound_bank = nil
+	end
+
 	local function dmc_try_fill_buffer()
 		if dmc_buffer_empty and dmc_bytes_remaining > 0 then
 			dmc_buffer = dmc_reader(dmc_current_addr)
@@ -664,11 +705,13 @@ return function(dmc_reader: (number) -> number): APUInstance
 				newindex(extra_pulse2_duty4_sound, 'Volume', duty == 4 and vrc6_pulse2_gain or 0)
 			end
 
-			if vrc6_saw_raw > 0 then
-				newindex(vrc6_saw_sound, 'PlaybackSpeed', SAW_SPEED_NUM / (bit32.rshift(vrc6_saw_timer, vrc6_frequency_shift) + 1))
-				newindex(vrc6_saw_sound, 'Volume', vrc6_saw_gain)
-			else
-				newindex(vrc6_saw_sound, 'Volume', 0)
+			if vrc6_saw_sound ~= nil then
+				if vrc6_saw_raw > 0 then
+					newindex(vrc6_saw_sound, 'PlaybackSpeed', SAW_SPEED_NUM / (bit32.rshift(vrc6_saw_timer, vrc6_frequency_shift) + 1))
+					newindex(vrc6_saw_sound, 'Volume', vrc6_saw_gain)
+				else
+					newindex(vrc6_saw_sound, 'Volume', 0)
+				end
 			end
 		end
 
@@ -691,7 +734,7 @@ return function(dmc_reader: (number) -> number): APUInstance
 			end
 		end
 
-		if vrc7_enabled then
+		if vrc7_enabled and vrc7_voice_sound_bank ~= nil then
 			for i, bank in vrc7_voice_sound_bank do
 				local raw = buffer.readu8(vrc7_rawb, i - 1)
 				if raw <= 0 then
@@ -1172,14 +1215,9 @@ return function(dmc_reader: (number) -> number): APUInstance
 		end
 		
 		if enabled then
-			if vrc6_saw_sound ~= nil then
-				vrc6_saw_sound = create_looped_sound('VRC6_Saw', 'triangle', nil)
-			end
+			ensure_vrc6_saw_sound()
 		else
-			if vrc6_saw_sound then
-				vrc6_saw_sound:Destroy()
-				vrc6_saw_sound = nil
-			end
+			release_vrc6_saw_sound()
 		end
 		update_audio_mixer()
 		mixer_dirty = false
@@ -1187,25 +1225,9 @@ return function(dmc_reader: (number) -> number): APUInstance
 
 	local function set_vrc7_enabled(enabled: boolean)
 		if enabled then
-			if vrc7_voice_sound_bank then
-				local voice_bank = {} :: {{Sound}}
-				for channel = 1, 6 do
-					local bank = {} :: {Sound}
-					local prefix = `VRC7_{channel}`
-					for wave = 1, #VOICE_ASSET_KEYS do
-						bank[wave] = create_looped_sound(prefix .. '_' .. wave, VOICE_ASSET_KEYS[wave], nil)
-					end
-					voice_bank[channel] = bank
-				end
-				vrc7_voice_sound_bank = voice_bank
-			end
+			ensure_vrc7_voice_sounds()
 		else
-			if vrc7_voice_sound_bank then
-				for _, bank in vrc7_voice_sound_bank do
-					destroy_sound_bank(bank)
-				end
-				vrc7_voice_sound_bank = nil
-			end
+			release_vrc7_voice_sounds()
 		end
 		vrc7_enabled = enabled
 		update_audio_mixer()
@@ -1410,12 +1432,12 @@ return function(dmc_reader: (number) -> number): APUInstance
 		pulse2_length_halt = false
 		pulse2_envelope_period = 0
 		
-		pulse1_sweep_shift = false
+		pulse1_sweep_shift = 0
 		pulse1_sweep_divider_period = 0
 		pulse1_sweep_negate = false
 		pulse1_sweep_active = false
 		
-		pulse2_sweep_shift = false
+		pulse2_sweep_shift = 0
 		pulse2_sweep_divider_period = 0
 		pulse2_sweep_negate = false
 		pulse2_sweep_active = false
@@ -1438,7 +1460,7 @@ return function(dmc_reader: (number) -> number): APUInstance
 		pulse2_sweep_reload = false
 
 		triangle_length_halt = false
-		triangle_linear_reload_value = false
+		triangle_linear_reload_value = 0
 		
 		triangle_timer_low = 0
 		triangle_timer = 0

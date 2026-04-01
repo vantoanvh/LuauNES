@@ -1,4 +1,4 @@
-# LuauNES, The fastest NES emulator in roblox.
+# LuauNES, The fastest NES emulator in Roblox.
 
 ![Ver](https://img.shields.io/badge/version-v1.5.1-blue?style=plastic)
 [![License](https://img.shields.io/badge/license-MIT-97ca00?style=plastic)](https://github.com/vantoanvh/LuauNES/blob/main/LICENSE)
@@ -8,19 +8,19 @@
 This is very performant and able to run **Kirby Adventure** with ~150 FPS ( 13th Gen Intel® Core™ i7-13620H )<br>
 also **Donkey Kong Classics** with ~220 FPS.
 <br><br>
-But for low/mid-end devices, it still run pretty smooth. ( ~30-70 FPS )
+But for low/mid-end devices, it still runs pretty smoothly. ( ~30-70 FPS )
 <br>
 
-Moreover, you should upload your audio files as your own ( I cannot distrub the sounds because I am unverified )<br>
+Moreover, you should upload your audio files as your own ( I cannot distribute the sounds because I am unverified )<br>
 The audio files you can download in the [Sounds](https://github.com/vantoanvh/LuauNES/tree/main/Sounds) folder<br>
 
-> <h3>Disclamer</h3> Your device should have native code generation to make this run effectively.<br>This used <strong>EditableImage</strong> so you need ID Verification for this.
+> <h3>Disclaimer</h3> Your device should have native code generation to make this run effectively.<br>This uses <strong>EditableImage</strong> so you need ID verification for this.
 
 ## Features
 
 - 2-player support.
 - zapper support ( or mouse ).
-- Full noises sequences, pulses (with extra ones), triangles for sounds.
+- Full noise sequences, pulses (with extra ones), triangles for sounds.
 - PPU dot-based
 - Almost cycle-accurate CPU
 - No DMC channels (sorry!)
@@ -226,7 +226,7 @@ UserInputService.InputEnded:Connect(Released)
 -- PostSimulation runs once per simulation step,
 -- so the emulator work is done before PreRender
 -- and does not block rendering as much.
--- it's a good pratice to do this way
+-- it's a good practice to do this way
 RunService.PostSimulation:Connect(onRendered)
 RunService.PreRender:Connect(updateZapper)
 ```
