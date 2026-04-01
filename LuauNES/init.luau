@@ -3050,7 +3050,7 @@ return {
 		buffer.fill(ram, 0, 0, 0x800)
 		buffer.fill(vram, 0, 0, 0x1000)
 		buffer.fill(oam, 0, 0, 0x100)
-		buffer.fill(palette, 0, 0, 31)
+		buffer.fill(palette, 0, 0, 32)
 
 		for i = 0, 31 do
 			local base_color_index = bit32.band(buffer.readu8(palette, i), 0x3F)
