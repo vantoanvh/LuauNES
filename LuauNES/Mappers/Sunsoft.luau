@@ -10,7 +10,7 @@ local atLeastOne = Base.atLeastOne
 local wrapBank = Base.wrapBank
 local normalizeOffset = Base.normalizeOffset
 
-local function read_buffer_u8(buf: buffer?, len: number, offset: number): number
+const function read_buffer_u8(buf: buffer?, len: number, offset: number): number
 	if buf ~= nil and offset >= 0 and offset < len then
 		return buffer.readu8(buf, offset)
 	end
@@ -18,14 +18,14 @@ local function read_buffer_u8(buf: buffer?, len: number, offset: number): number
 	return 0
 end
 
-local function write_buffer_u8(buf: buffer?, len: number, offset: number, value: number)
+const function write_buffer_u8(buf: buffer?, len: number, offset: number, value: number)
 	if buf ~= nil and offset >= 0 and offset < len then
 		buffer.writeu8(buf, offset, value)
 	end
 end
 
 --// MAPPER_067
-local function Sunsoft3(config: MapperConfig)
+const function Sunsoft3(config: MapperConfig)
 	local prg_total_16k = atLeastOne(config.prgSize // 0x4000)
 	local chr_total_2k = atLeastOne(config.chrSize // 0x0800)
 
@@ -42,7 +42,7 @@ local function Sunsoft3(config: MapperConfig)
 	local irq_counter = 0
 	local irq_pending = false
 
-	local function set_chr_base(index: number, value: number)
+	const function set_chr_base(index: number, value: number)
 		local base = wrapBank(value, chr_total_2k) * 0x0800
 		if index == 0 then
 			chr_base0 = base
@@ -55,11 +55,11 @@ local function Sunsoft3(config: MapperConfig)
 		end
 	end
 
-	local function recalc_prg_base()
+	const function recalc_prg_base()
 		prg_base_8000 = wrapBank(prg_bank, prg_total_16k) * 0x4000
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -72,7 +72,7 @@ local function Sunsoft3(config: MapperConfig)
 		return prg_base_C000 + bit32.band(addr, 0x3FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local segment = bit32.rshift(addr, 11)
 		if segment == 0 then
@@ -87,7 +87,7 @@ local function Sunsoft3(config: MapperConfig)
 		return chr_base3 + bit32.band(addr, 0x07FF)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -128,7 +128,7 @@ local function Sunsoft3(config: MapperConfig)
 		end
 	end
 
-	local function clock_cpu(cycles: number)
+	const function clock_cpu(cycles: number)
 		if not irq_enabled or cycles <= 0 then
 			return
 		end
@@ -143,7 +143,7 @@ local function Sunsoft3(config: MapperConfig)
 		irq_pending = true
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		prg_bank = 0
 		recalc_prg_base()
@@ -189,7 +189,7 @@ local function Sunsoft3(config: MapperConfig)
 end
 
 --// MAPPER_068
-local function Sunsoft4(config: MapperConfig)
+const function Sunsoft4(config: MapperConfig)
 	local prg_total_16k = atLeastOne(config.prgSize // 0x4000)
 	local internal_prg_total_16k = if prg_total_16k < 8 then prg_total_16k else 8
 	local chr_total_1k = atLeastOne(config.chrSize // 0x0400)
@@ -214,7 +214,7 @@ local function Sunsoft4(config: MapperConfig)
 	local prg_base_8000 = 0
 	local prg_base_C000 = wrapBank(7, prg_total_16k) * 0x4000
 
-	local function set_chr_base(index: number, value: number)
+	const function set_chr_base(index: number, value: number)
 		local base = wrapBank(value, chr_total_1k) * 0x0400
 		if index == 0 then
 			chr_base0 = base
@@ -227,7 +227,7 @@ local function Sunsoft4(config: MapperConfig)
 		end
 	end
 
-	local function recalc_prg_base(value: number)
+	const function recalc_prg_base(value: number)
 		local internal_bank = wrapBank(bit32.band(value, 0x07), internal_prg_total_16k)
 		local external_count = prg_total_16k - 8
 		local wants_external = bit32.band(value, 0x08) == 0
@@ -243,7 +243,7 @@ local function Sunsoft4(config: MapperConfig)
 		end
 	end
 
-	local function nametable_chr_base(slot: number): number
+	const function nametable_chr_base(slot: number): number
 		local reg_select = 0
 		if mirroring == 2 then
 			reg_select = bit32.band(slot, 0x01)
@@ -257,7 +257,7 @@ local function Sunsoft4(config: MapperConfig)
 		return wrapBank(page, chr_total_1k) * 0x0400
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -273,7 +273,7 @@ local function Sunsoft4(config: MapperConfig)
 		return prg_base_C000 + bit32.band(addr, 0x3FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local segment = bit32.rshift(addr, 11)
 		if segment == 0 then
@@ -288,7 +288,7 @@ local function Sunsoft4(config: MapperConfig)
 		return chr_base3 + bit32.band(addr, 0x07FF)
 	end
 
-	local function read_nametable(addr: number): number?
+	const function read_nametable(addr: number): number?
 		if not use_chr_for_nametables then
 			return nil
 		end
@@ -299,7 +299,7 @@ local function Sunsoft4(config: MapperConfig)
 		return read_buffer_u8(chr_buf, chr_size, nametable_chr_base(slot) + inner)
 	end
 
-	local function write_nametable(addr: number, value: number): boolean
+	const function write_nametable(addr: number, value: number): boolean
 		if not use_chr_for_nametables then
 			return false
 		end
@@ -314,7 +314,7 @@ local function Sunsoft4(config: MapperConfig)
 		return true
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if not prg_ram_available or not prg_ram_enabled then
 			return nil
 		end
@@ -327,7 +327,7 @@ local function Sunsoft4(config: MapperConfig)
 		return normalizeOffset(addr - 0x6000, prg_ram_size)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr >= 0x6000 and addr < 0x8000 then
 			licensing_timer = 1024 * 105
@@ -369,7 +369,7 @@ local function Sunsoft4(config: MapperConfig)
 		end
 	end
 
-	local function clock_cpu(cycles: number)
+	const function clock_cpu(cycles: number)
 		if licensing_timer <= 0 or cycles <= 0 then
 			return
 		end
@@ -381,7 +381,7 @@ local function Sunsoft4(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		chr_base0 = 0
 		chr_base1 = 0
@@ -430,7 +430,7 @@ local function Sunsoft4(config: MapperConfig)
 end
 
 --// MAPPER_089
-local function Sunsoft89(config: MapperConfig)
+const function Sunsoft89(config: MapperConfig)
 	local prg_total_16k = atLeastOne(config.prgSize // 0x4000)
 	local chr_total_8k = atLeastOne(config.chrSize // 0x2000)
 
@@ -440,11 +440,11 @@ local function Sunsoft89(config: MapperConfig)
 	local prg_base_8000 = 0
 	local prg_base_C000 = wrapBank(prg_total_16k - 1, prg_total_16k) * 0x4000
 
-	local function recalc_bases()
+	const function recalc_bases()
 		prg_base_8000 = wrapBank(prg_bank, prg_total_16k) * 0x4000
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -457,12 +457,12 @@ local function Sunsoft89(config: MapperConfig)
 		return prg_base_C000 + bit32.band(addr, 0x3FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		return chr_bank * 0x2000 + addr
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		if bit32.band(addr, 0xFFFF) < 0x8000 then
 			return
 		end
@@ -476,7 +476,7 @@ local function Sunsoft89(config: MapperConfig)
 		recalc_bases()
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		prg_bank = 0
 		chr_bank = 0
@@ -511,7 +511,7 @@ local function Sunsoft89(config: MapperConfig)
 end
 
 --// MAPPER_093
-local function Sunsoft93(config: MapperConfig)
+const function Sunsoft93(config: MapperConfig)
 	local prg_total_16k = atLeastOne(config.prgSize // 0x4000)
 
 	local chr_enabled = true
@@ -519,11 +519,11 @@ local function Sunsoft93(config: MapperConfig)
 	local prg_base_8000 = 0
 	local prg_base_C000 = wrapBank(prg_total_16k - 1, prg_total_16k) * 0x4000
 
-	local function recalc_prg_base()
+	const function recalc_prg_base()
 		prg_base_8000 = wrapBank(prg_bank, prg_total_16k) * 0x4000
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -536,7 +536,7 @@ local function Sunsoft93(config: MapperConfig)
 		return prg_base_C000 + bit32.band(addr, 0x3FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		if chr_enabled then
 			return bit32.band(addr, 0x1FFF)
 		end
@@ -544,7 +544,7 @@ local function Sunsoft93(config: MapperConfig)
 		return -1
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		if bit32.band(addr, 0xFFFF) < 0x8000 then
 			return
 		end
@@ -554,7 +554,7 @@ local function Sunsoft93(config: MapperConfig)
 		recalc_prg_base()
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		chr_enabled = true
 		prg_bank = 0
 		recalc_prg_base()
@@ -586,13 +586,13 @@ local function Sunsoft93(config: MapperConfig)
 end
 
 --// MAPPER_184
-local function Sunsoft184(config: MapperConfig)
+const function Sunsoft184(config: MapperConfig)
 	local chr_total_4k = atLeastOne(config.chrSize // 0x1000)
 
 	local chr_base0 = 0
 	local chr_base1 = 0
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -601,7 +601,7 @@ local function Sunsoft184(config: MapperConfig)
 		return bit32.band(addr - 0x8000, 0x7FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		if addr < 0x1000 then
 			return chr_base0 + addr
@@ -610,7 +610,7 @@ local function Sunsoft184(config: MapperConfig)
 		return chr_base1 + bit32.band(addr, 0x0FFF)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x6000 or addr >= 0x8000 then
 			return
@@ -620,7 +620,7 @@ local function Sunsoft184(config: MapperConfig)
 		chr_base1 = wrapBank(bit32.bor(0x80, bit32.band(bit32.rshift(value, 4), 0x07)), chr_total_4k) * 0x1000
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		chr_base0 = 0
 		chr_base1 = wrapBank(1, chr_total_4k) * 0x1000
 	end
@@ -651,7 +651,7 @@ local function Sunsoft184(config: MapperConfig)
 end
 
 --// MAPPER_069
-local function FME7(config: MapperConfig)
+const function FME7(config: MapperConfig)
 	local prg_total_8k = atLeastOne(config.prgSize // 0x2000)
 	local chr_total_1k = atLeastOne(config.chrSize // 0x0400)
 	local prg_ram_size = config.prgRamSize
@@ -695,13 +695,13 @@ local function FME7(config: MapperConfig)
 	local irq_counter_enabled = false
 	local irq_pending = false
 
-	local function recalc_prg_bases()
+	const function recalc_prg_bases()
 		prg_base_8000 = wrapBank(prg_bank_8000, prg_total_8k) * 0x2000
 		prg_base_A000 = wrapBank(prg_bank_A000, prg_total_8k) * 0x2000
 		prg_base_C000 = wrapBank(prg_bank_C000, prg_total_8k) * 0x2000
 	end
 
-	local function recalc_chr_bases()
+	const function recalc_chr_bases()
 		chr_base0 = wrapBank(chr_reg0, chr_total_1k) * 0x0400
 		chr_base1 = wrapBank(chr_reg1, chr_total_1k) * 0x0400
 		chr_base2 = wrapBank(chr_reg2, chr_total_1k) * 0x0400
@@ -712,11 +712,11 @@ local function FME7(config: MapperConfig)
 		chr_base7 = wrapBank(chr_reg7, chr_total_1k) * 0x0400
 	end
 
-	local function recalc_prg_6000_base()
+	const function recalc_prg_6000_base()
 		prg_6000_rom_base = wrapBank(prg_ram_bank, prg_total_8k) * 0x2000
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr >= 0x6000 and addr < 0x8000 then
 			if not prg_ram_mapped then
@@ -741,7 +741,7 @@ local function FME7(config: MapperConfig)
 		return prg_base_E000 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local segment = bit32.rshift(addr, 10)
 		if segment == 0 then
@@ -768,7 +768,7 @@ local function FME7(config: MapperConfig)
 		return chr_base7 + bit32.band(addr, 0x03FF)
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if not prg_ram_available or not prg_ram_enabled or not prg_ram_mapped then
 			return nil
 		end
@@ -783,7 +783,7 @@ local function FME7(config: MapperConfig)
 		return normalizeOffset(ram_offset, prg_ram_size)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -862,7 +862,7 @@ local function FME7(config: MapperConfig)
 		end
 	end
 
-	local function clock_cpu(cycles: number)
+	const function clock_cpu(cycles: number)
 		if not irq_counter_enabled or cycles <= 0 then
 			return
 		end
@@ -880,7 +880,7 @@ local function FME7(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		command = 0
 		chr_reg0 = 0

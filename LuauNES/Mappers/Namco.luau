@@ -10,7 +10,7 @@ local atLeastOne = Base.atLeastOne
 local normalizeOffset = Base.normalizeOffset
 local wrapBank = Base.wrapBank
 
-local function read_buffer_u8(buf: buffer?, len: number, offset: number): number
+const function read_buffer_u8(buf: buffer?, len: number, offset: number): number
 	if buf ~= nil and offset >= 0 and offset < len then
 		return buffer.readu8(buf, offset)
 	end
@@ -18,13 +18,13 @@ local function read_buffer_u8(buf: buffer?, len: number, offset: number): number
 	return 0
 end
 
-local function write_buffer_u8(buf: buffer?, len: number, offset: number, value: number)
+const function write_buffer_u8(buf: buffer?, len: number, offset: number, value: number)
 	if buf ~= nil and offset >= 0 and offset < len then
 		buffer.writeu8(buf, offset, value)
 	end
 end
 
-local function reset_mirroring_pages(mode: number): (number, number, number, number)
+const function reset_mirroring_pages(mode: number): (number, number, number, number)
 	if mode == 0 then
 		return 0, 0, 0, 0
 	end
@@ -40,7 +40,7 @@ local function reset_mirroring_pages(mode: number): (number, number, number, num
 	return 0, 0, 1, 1
 end
 
-local function create_namco108(config: MapperConfig, variant: string)
+const function create_namco108(config: MapperConfig, variant: string)
 	local prg_total_8k = atLeastOne(config.prgSize // 0x2000)
 	local chr_total_1k = atLeastOne(config.chrSize // 0x0400)
 	local chr_total_2k = atLeastOne(config.chrSize // 0x0800)
@@ -83,7 +83,7 @@ local function create_namco108(config: MapperConfig, variant: string)
 	local nametable_page2 = 0
 	local nametable_page3 = 1
 
-	local function recalc_prg_slots()
+	const function recalc_prg_slots()
 		local r6 = wrapBank(reg6, prg_total_8k)
 		local r7 = wrapBank(reg7, prg_total_8k)
 		local last = math.max(prg_total_8k - 1, 0)
@@ -95,7 +95,7 @@ local function create_namco108(config: MapperConfig, variant: string)
 		prg_base3 = last * 0x2000
 	end
 
-	local function recalc_chr_slots()
+	const function recalc_chr_slots()
 		if is_mapper_76 then
 			chr_base0 = wrapBank(reg2, chr_total_2k) * 0x0800
 			chr_base1 = wrapBank(reg3, chr_total_2k) * 0x0800
@@ -130,7 +130,7 @@ local function create_namco108(config: MapperConfig, variant: string)
 		chr_base7 = wrapBank(r5, chr_total_1k) * 0x0400
 	end
 
-	local function update_nametable_pages()
+	const function update_nametable_pages()
 		if not is_mapper_95 then
 			return
 		end
@@ -141,7 +141,7 @@ local function create_namco108(config: MapperConfig, variant: string)
 		nametable_page3 = nametable_page2
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -160,7 +160,7 @@ local function create_namco108(config: MapperConfig, variant: string)
 		return prg_base3 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 
 		if is_mapper_76 then
@@ -202,7 +202,7 @@ local function create_namco108(config: MapperConfig, variant: string)
 		return chr_base7 + bit32.band(addr, 0x03FF)
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if not prg_ram_available then
 			return nil
 		end
@@ -215,7 +215,7 @@ local function create_namco108(config: MapperConfig, variant: string)
 		return normalizeOffset(addr - 0x6000, prg_ram_size)
 	end
 
-	local function read_nametable(addr: number): number?
+	const function read_nametable(addr: number): number?
 		if vram_buf then
 			local offset = bit32.band(addr, 0x0FFF)
 			local nt = bit32.rshift(offset, 10)
@@ -227,7 +227,7 @@ local function create_namco108(config: MapperConfig, variant: string)
 		return nil
 	end
 
-	local function write_nametable(addr: number, value: number): boolean
+	const function write_nametable(addr: number, value: number): boolean
 		if vram_buf then
 			local offset = bit32.band(addr, 0x0FFF)
 			local nt = bit32.rshift(offset, 10)
@@ -239,7 +239,7 @@ local function create_namco108(config: MapperConfig, variant: string)
 		return true
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -284,7 +284,7 @@ local function create_namco108(config: MapperConfig, variant: string)
 		update_nametable_pages()
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		local page0, page1, page2, page3 = reset_mirroring_pages(config.initialMirroring)
 
 		bank_select = 0
@@ -337,7 +337,7 @@ local NAMCO_VARIANT_163 = 1
 local NAMCO_VARIANT_175 = 2
 local NAMCO_VARIANT_340 = 3
 
-local function Namco163(config: MapperConfig)
+const function Namco163(config: MapperConfig)
 	local prg_total_8k = atLeastOne(config.prgSize // 0x2000)
 	local chr_total_1k = atLeastOne(config.chrSize // 0x0400)
 	local prg_ram_buf = config.prgRam
@@ -375,13 +375,13 @@ local function Namco163(config: MapperConfig)
 	local audio_auto_increment = false
 	local _audio_disable_sound = false
 
-	local function set_variant(new_variant: number)
+	const function set_variant(new_variant: number)
 		if auto_detect_variant and (not not_namco340 or new_variant ~= NAMCO_VARIANT_340) then
 			variant = new_variant
 		end
 	end
 
-	local function recalc_pattern_slot(slot: number)
+	const function recalc_pattern_slot(slot: number)
 		local value = buffer.readu8(pattern_regs, slot - 1)
 		local use_nt = variant == NAMCO_VARIANT_163
 			and value >= 0xE0
@@ -391,7 +391,7 @@ local function Namco163(config: MapperConfig)
 		chr_slot_base[slot] = (use_nt and bit32.band(value, 0x01) or wrapBank(value, chr_total_1k)) * 0x0400
 	end
 
-	local function recalc_nametable_slot(slot: number)
+	const function recalc_nametable_slot(slot: number)
 		local value = buffer.readu8(nametable_regs, slot - 1)
 		local use_chr = value < 0xE0
 
@@ -399,25 +399,25 @@ local function Namco163(config: MapperConfig)
 		nt_slot_base[slot] = (use_chr and wrapBank(value, chr_total_1k) or bit32.band(value, 0x01)) * 0x0400
 	end
 
-	local function recalc_pattern_slots()
+	const function recalc_pattern_slots()
 		for slot = 1, 8 do
 			recalc_pattern_slot(slot)
 		end
 	end
 
-	local function recalc_nametable_slots()
+	const function recalc_nametable_slots()
 		for slot = 1, 4 do
 			recalc_nametable_slot(slot)
 		end
 	end
 
-	local function namco163_prg_ram_offset(addr: number): number
+	const function namco163_prg_ram_offset(addr: number): number
 		local inner = bit32.band(addr, 0x07FF)
 		local page = bit32.rshift(addr - 0x6000, 11)
 		return normalizeOffset(page * 0x0800 + inner, prg_ram_size)
 	end
 
-	local function namco163_prg_ram_readable(addr: number): boolean
+	const function namco163_prg_ram_readable(addr: number): boolean
 		if prg_ram_buf == nil or prg_ram_size <= 0 or addr < 0x6000 or addr >= 0x8000 then
 			return false
 		end
@@ -433,7 +433,7 @@ local function Namco163(config: MapperConfig)
 		return false
 	end
 
-	local function namco163_prg_ram_writable(addr: number): boolean
+	const function namco163_prg_ram_writable(addr: number): boolean
 		if prg_ram_buf == nil or prg_ram_size <= 0 or addr < 0x6000 or addr >= 0x8000 then
 			return false
 		end
@@ -454,7 +454,7 @@ local function Namco163(config: MapperConfig)
 		return false
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -473,7 +473,7 @@ local function Namco163(config: MapperConfig)
 		return prg_base3 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local slot = bit32.rshift(addr, 10) + 1
 		if chr_slot_nt[slot] then
@@ -483,7 +483,7 @@ local function Namco163(config: MapperConfig)
 		return chr_slot_base[slot] + bit32.band(addr, 0x03FF)
 	end
 
-	local function read_ppu(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number?
+	const function read_ppu(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number?
 		if vram_buf == nil then
 			return nil
 		end
@@ -497,7 +497,7 @@ local function Namco163(config: MapperConfig)
 		return buffer.readu8(vram_buf, chr_slot_base[slot] + bit32.band(addr, 0x03FF))
 	end
 
-	local function write_ppu(addr: number, value: number): boolean
+	const function write_ppu(addr: number, value: number): boolean
 		if vram_buf == nil then
 			return false
 		end
@@ -512,7 +512,7 @@ local function Namco163(config: MapperConfig)
 		return true
 	end
 
-	local function read_nametable(addr: number): number?
+	const function read_nametable(addr: number): number?
 		local offset = bit32.band(addr, 0x0FFF)
 		local slot = bit32.rshift(offset, 10) + 1
 		local base = nt_slot_base[slot] + bit32.band(offset, 0x03FF)
@@ -528,7 +528,7 @@ local function Namco163(config: MapperConfig)
 		return buffer.readu8(vram_buf, base)
 	end
 
-	local function write_nametable(addr: number, value: number): boolean
+	const function write_nametable(addr: number, value: number): boolean
 		local offset = bit32.band(addr, 0x0FFF)
 		local slot = bit32.rshift(offset, 10) + 1
 		local base = nt_slot_base[slot] + bit32.band(offset, 0x03FF)
@@ -548,7 +548,7 @@ local function Namco163(config: MapperConfig)
 		return false
 	end
 
-	local function read_cpu(addr: number): number?
+	const function read_cpu(addr: number): number?
 		addr = bit32.band(addr, 0xFFFF)
 
 		local reg = bit32.band(addr, 0xF800)
@@ -573,7 +573,7 @@ local function Namco163(config: MapperConfig)
 		return nil
 	end
 
-	local function write_audio_register(addr: number, value: number)
+	const function write_audio_register(addr: number, value: number)
 		local reg = bit32.band(addr, 0xF800)
 		if reg == 0x4800 then
 			buffer.writeu8(audio_ram, audio_ram_pos, value)
@@ -588,7 +588,7 @@ local function Namco163(config: MapperConfig)
 		end
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 
 		if addr >= 0x6000 and addr < 0x8000 then
@@ -697,7 +697,7 @@ local function Namco163(config: MapperConfig)
 		end
 	end
 
-	local function clock_cpu(cycles: number)
+	const function clock_cpu(cycles: number)
 		if cycles <= 0 or not bit32.btest(irq_counter, 0x8000) then
 			return
 		end
@@ -716,7 +716,7 @@ local function Namco163(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		not_namco340 = false
 		write_protect = 0

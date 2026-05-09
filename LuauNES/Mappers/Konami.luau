@@ -30,7 +30,7 @@ local VRC4D = 6
 local VRC4E = 7
 local VRC4_27 = 8
 
-local function create_vrc_irq(): VrcIrqState
+const function create_vrc_irq(): VrcIrqState
 	return {
 		reloadValue = 0,
 		counter = 0,
@@ -42,7 +42,7 @@ local function create_vrc_irq(): VrcIrqState
 	}
 end
 
-local function reset_vrc_irq(irq: VrcIrqState)
+const function reset_vrc_irq(irq: VrcIrqState)
 	irq.reloadValue = 0
 	irq.counter = 0
 	irq.prescaler = 0
@@ -52,7 +52,7 @@ local function reset_vrc_irq(irq: VrcIrqState)
 	irq.pending = false
 end
 
-local function step_vrc_irq_counter(irq: VrcIrqState)
+const function step_vrc_irq_counter(irq: VrcIrqState)
 	if irq.counter == 0xFF then
 		irq.counter = irq.reloadValue
 		irq.pending = true
@@ -61,7 +61,7 @@ local function step_vrc_irq_counter(irq: VrcIrqState)
 	end
 end
 
-local function clock_vrc_irq(irq: VrcIrqState, cycles: number)
+const function clock_vrc_irq(irq: VrcIrqState, cycles: number)
 	if not irq.enabled or cycles <= 0 then
 		return
 	end
@@ -75,11 +75,11 @@ local function clock_vrc_irq(irq: VrcIrqState, cycles: number)
 	end
 end
 
-local function set_vrc_irq_reload_value(irq: VrcIrqState, value: number)
+const function set_vrc_irq_reload_value(irq: VrcIrqState, value: number)
 	irq.reloadValue = value
 end
 
-local function set_vrc_irq_reload_nibble(irq: VrcIrqState, value: number, high_bits: boolean)
+const function set_vrc_irq_reload_nibble(irq: VrcIrqState, value: number, high_bits: boolean)
 	value = bit32.band(value, 0x0F)
 	if high_bits then
 		irq.reloadValue = bit32.bor(bit32.band(irq.reloadValue, 0x0F), value * 16)
@@ -88,7 +88,7 @@ local function set_vrc_irq_reload_nibble(irq: VrcIrqState, value: number, high_b
 	end
 end
 
-local function set_vrc_irq_control(irq: VrcIrqState, value: number)
+const function set_vrc_irq_control(irq: VrcIrqState, value: number)
 	irq.enabledAfterAck = bit32.btest(value, 0x01)
 	irq.enabled = bit32.btest(value, 0x02)
 	irq.cycleMode = bit32.btest(value, 0x04)
@@ -99,12 +99,12 @@ local function set_vrc_irq_control(irq: VrcIrqState, value: number)
 	irq.pending = false
 end
 
-local function acknowledge_vrc_irq(irq: VrcIrqState)
+const function acknowledge_vrc_irq(irq: VrcIrqState)
 	irq.enabled = irq.enabledAfterAck
 	irq.pending = false
 end
 
-local function translated_vrc2_4_addr(addr: number, variant: number, use_heuristics: boolean): number
+const function translated_vrc2_4_addr(addr: number, variant: number, use_heuristics: boolean): number
 	local a0 = 0
 	local a1 = 0
 
@@ -156,7 +156,7 @@ local function translated_vrc2_4_addr(addr: number, variant: number, use_heurist
 	return bit32.bor(bit32.band(addr, 0xFF00), a1 * 2, a0)
 end
 
-local function detect_vrc2_4_variant(config: MapperConfig): (number, boolean)
+const function detect_vrc2_4_variant(config: MapperConfig): (number, boolean)
 	local submapper = config.submapper or 0
 	local mapper_id = config.id
 
@@ -192,7 +192,7 @@ local function detect_vrc2_4_variant(config: MapperConfig): (number, boolean)
 end
 
 --// MAPPER_075
-local function VRC1(config: MapperConfig)
+const function VRC1(config: MapperConfig)
 	local prg_total_8k = atLeastOne(config.prgSize // 0x2000)
 	local chr_total_4k = atLeastOne(config.chrSize // 0x1000)
 	local prg_ram_size = config.prgRamSize
@@ -209,15 +209,15 @@ local function VRC1(config: MapperConfig)
 	local chr_base_0000 = 0
 	local chr_base_1000 = 0
 
-	local function recalc_chr_base_0000()
+	const function recalc_chr_base_0000()
 		chr_base_0000 = wrapBank(chr_bank_0000, chr_total_4k) * 0x1000
 	end
 
-	local function recalc_chr_base_1000()
+	const function recalc_chr_base_1000()
 		chr_base_1000 = wrapBank(chr_bank_1000, chr_total_4k) * 0x1000
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return -1
@@ -236,7 +236,7 @@ local function VRC1(config: MapperConfig)
 		return prg_base_E000 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		if addr < 0x1000 then
 			return chr_base_0000 + bit32.band(addr, 0x0FFF)
@@ -245,7 +245,7 @@ local function VRC1(config: MapperConfig)
 		return chr_base_1000 + bit32.band(addr, 0x0FFF)
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if not prg_ram_available then
 			return nil
 		end
@@ -258,7 +258,7 @@ local function VRC1(config: MapperConfig)
 		return normalizeOffset(addr - 0x6000, prg_ram_size)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -288,7 +288,7 @@ local function VRC1(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		prg_base_8000 = 0
 		prg_base_A000 = wrapBank(1, prg_total_8k) * 0x2000
@@ -325,7 +325,7 @@ local function VRC1(config: MapperConfig)
 	}
 end
 
-local function VRC2_4(config: MapperConfig)
+const function VRC2_4(config: MapperConfig)
 	local prg_total_8k = atLeastOne(config.prgSize // 0x2000)
 	local chr_total_1k = atLeastOne(config.chrSize // 0x0400)
 	local prg_ram_size = config.prgRamSize
@@ -361,7 +361,7 @@ local function VRC2_4(config: MapperConfig)
 	local latch = 0
 	local irq = create_vrc_irq()
 
-	local function set_chr_base(index: number, base: number)
+	const function set_chr_base(index: number, base: number)
 		if index == 1 then
 			chr_base_0000 = base
 		elseif index == 2 then
@@ -381,7 +381,7 @@ local function VRC2_4(config: MapperConfig)
 		end
 	end
 
-	local function recalc_chr_base(index: number)
+	const function recalc_chr_base(index: number)
 		local offset = index - 1
 		local page = bit32.bor(buffer.readu8(chr_lo, offset), buffer.readu8(chr_hi, offset) * 16)
 		if variant == VRC2A then
@@ -390,7 +390,7 @@ local function VRC2_4(config: MapperConfig)
 		set_chr_base(index, wrapBank(page, chr_total_1k) * 0x0400)
 	end
 
-	local function recalc_prg_bases()
+	const function recalc_prg_bases()
 		local reg0_base = wrapBank(prg_reg0, prg_total_8k) * 0x2000
 		local reg1_base = wrapBank(prg_reg1, prg_total_8k) * 0x2000
 
@@ -407,7 +407,7 @@ local function VRC2_4(config: MapperConfig)
 		prg_base_E000 = prg_fixed_E000
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return -1
@@ -426,7 +426,7 @@ local function VRC2_4(config: MapperConfig)
 		return prg_base_E000 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		if addr < 0x0400 then
 			return chr_base_0000 + addr
@@ -453,7 +453,7 @@ local function VRC2_4(config: MapperConfig)
 		return chr_base_1C00 + bit32.band(addr, 0x03FF)
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if not prg_ram_available then
 			return nil
 		end
@@ -466,7 +466,7 @@ local function VRC2_4(config: MapperConfig)
 		return normalizeOffset(addr - 0x6000, prg_ram_size)
 	end
 
-	local function read_cpu(addr: number): number?
+	const function read_cpu(addr: number): number?
 		addr = bit32.band(addr, 0xFFFF)
 		if latch_enabled and addr >= 0x6000 and addr < 0x8000 then
 			return latch
@@ -474,7 +474,7 @@ local function VRC2_4(config: MapperConfig)
 		return nil
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			if latch_enabled and addr >= 0x6000 then
@@ -541,13 +541,13 @@ local function VRC2_4(config: MapperConfig)
 		end
 	end
 
-	local function clock_cpu(cycles: number)
+	const function clock_cpu(cycles: number)
 		if supports_vrc4_features then
 			clock_vrc_irq(irq, cycles)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		prg_reg0 = 0
 		prg_reg1 = 0
@@ -601,7 +601,7 @@ local function VRC2_4(config: MapperConfig)
 end
 
 --// MAPPER_073
-local function VRC3(config: MapperConfig)
+const function VRC3(config: MapperConfig)
 	local prg_total_16k = atLeastOne(config.prgSize // 0x4000)
 	local prg_ram_size = config.prgRamSize
 	local prg_ram_available = prg_ram_size > 0
@@ -615,7 +615,7 @@ local function VRC3(config: MapperConfig)
 	local irq_small_counter = false
 	local irq_pending = false
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return -1
@@ -628,11 +628,11 @@ local function VRC3(config: MapperConfig)
 		return prg_base_C000 + bit32.band(addr, 0x3FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		return bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if not prg_ram_available then
 			return nil
 		end
@@ -645,7 +645,7 @@ local function VRC3(config: MapperConfig)
 		return normalizeOffset(addr - 0x6000, prg_ram_size)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xF000)
 		if addr == 0x8000 then
 			irq_reload = bit32.bor(bit32.band(irq_reload, 0xFFF0), bit32.band(value, 0x0F))
@@ -671,7 +671,7 @@ local function VRC3(config: MapperConfig)
 		end
 	end
 
-	local function clock_cpu(cycles: number)
+	const function clock_cpu(cycles: number)
 		if not irq_enabled or cycles <= 0 then
 			return
 		end
@@ -700,7 +700,7 @@ local function VRC3(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		prg_base_8000 = 0
 		prg_base_C000 = wrapBank(prg_total_16k - 1, prg_total_16k) * 0x4000
 		irq_reload = 0
@@ -738,7 +738,7 @@ local function VRC3(config: MapperConfig)
 	}
 end
 
-local function VRC6(config: MapperConfig)
+const function VRC6(config: MapperConfig)
 	local prg_total_8k = atLeastOne(config.prgSize // 0x2000)
 	local prg_total_16k = atLeastOne(config.prgSize // 0x4000)
 	local chr_total_1k = atLeastOne(config.chrSize // 0x0400)
@@ -763,7 +763,7 @@ local function VRC6(config: MapperConfig)
 	local chr_base_1C00 = 0
 	local irq = create_vrc_irq()
 
-	local function refresh_vrc6_state()
+	const function refresh_vrc6_state()
 		local chr0 = buffer.readu8(chr_regs, 0)
 		local chr1 = buffer.readu8(chr_regs, 1)
 		local chr2 = buffer.readu8(chr_regs, 2)
@@ -864,7 +864,7 @@ local function VRC6(config: MapperConfig)
 		end
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return -1
@@ -879,7 +879,7 @@ local function VRC6(config: MapperConfig)
 		return prg_base_E000 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		if addr < 0x0400 then
 			return chr_base_0000 + addr
@@ -906,7 +906,7 @@ local function VRC6(config: MapperConfig)
 		return chr_base_1C00 + bit32.band(addr, 0x03FF)
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if not prg_ram_available then
 			return nil
 		end
@@ -919,7 +919,7 @@ local function VRC6(config: MapperConfig)
 		return normalizeOffset(addr - 0x6000, prg_ram_size)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -956,11 +956,11 @@ local function VRC6(config: MapperConfig)
 		end
 	end
 
-	local function clock_cpu(cycles: number)
+	const function clock_cpu(cycles: number)
 		clock_vrc_irq(irq, cycles)
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		prg_base_8000 = 0
 		prg_base_C000 = 0
@@ -1013,7 +1013,7 @@ local function VRC6(config: MapperConfig)
 end
 
 --// MAPPER_085
-local function VRC7(config: MapperConfig)
+const function VRC7(config: MapperConfig)
 	local prg_total_8k = atLeastOne(config.prgSize // 0x2000)
 	local chr_total_1k = atLeastOne(config.chrSize // 0x0400)
 	local prg_ram_size = config.prgRamSize
@@ -1036,7 +1036,7 @@ local function VRC7(config: MapperConfig)
 	local control_flags = 0
 	local irq = create_vrc_irq()
 
-	local function update_state()
+	const function update_state()
 		if not four_screen then
 			local mode = bit32.band(control_flags, 0x03)
 			if mode == 0 then
@@ -1051,7 +1051,7 @@ local function VRC7(config: MapperConfig)
 		end
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return -1
@@ -1070,7 +1070,7 @@ local function VRC7(config: MapperConfig)
 		return prg_base_E000 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		if addr < 0x0400 then
 			return chr_base_0000 + addr
@@ -1097,7 +1097,7 @@ local function VRC7(config: MapperConfig)
 		return chr_base_1C00 + bit32.band(addr, 0x03FF)
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if not prg_ram_available then
 			return nil
 		end
@@ -1110,7 +1110,7 @@ local function VRC7(config: MapperConfig)
 		return normalizeOffset(addr - 0x6000, prg_ram_size)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -1155,11 +1155,11 @@ local function VRC7(config: MapperConfig)
 		end
 	end
 
-	local function clock_cpu(cycles: number)
+	const function clock_cpu(cycles: number)
 		clock_vrc_irq(irq, cycles)
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		prg_base_8000 = 0
 		prg_base_A000 = 0

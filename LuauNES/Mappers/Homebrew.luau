@@ -10,7 +10,7 @@ local atLeastOne = Base.atLeastOne
 local wrapBank = Base.wrapBank
 
 --// MAPPER_030
-local function UNROM512(config: MapperConfig)
+const function UNROM512(config: MapperConfig)
 	local prg_banks_16k = atLeastOne(config.prgSize // 0x4000)
 	local chr_banks_8k = atLeastOne(config.chrSize // 0x2000)
 	local four_screen = config.fourScreen
@@ -24,7 +24,7 @@ local function UNROM512(config: MapperConfig)
 	local prg_bank = 0
 	local chr_bank = 0
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -37,12 +37,12 @@ local function UNROM512(config: MapperConfig)
 		return (prg_banks_16k - 1) * 0x4000 + bit32.band(addr, 0x3FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		return chr_bank * 0x2000 + addr
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -57,7 +57,7 @@ local function UNROM512(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		prg_bank = 0
 		chr_bank = 0
 		mirroring = if four_screen then 2 else config.initialMirroring

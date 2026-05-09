@@ -1,5 +1,5 @@
---!optimize 2
 --!native
+--!optimize 2
 --!strict
 
 local Base = require'@self/Base'
@@ -65,14 +65,19 @@ for mapper_id, factory in Unlicensed :: MapperFactories do
 	factories[mapper_id] = factory
 end
 
-return {
-	supports = function(mapper_id: number): boolean
-		return factories[mapper_id] ~= nil
-	end,
+const function Supports(mapper_id: number): boolean
+	return factories[mapper_id] ~= nil
+end
 
-	create = function(config: MapperConfig)
-		local factory = factories[config.id]
-		assert(factory ~= nil, `Unsupported mapper: {config.id}`)
-		return factory(config)
-	end,
+const function Create(config: MapperConfig): Mapper
+	local factory = factories[config.id]
+	if factory == nil then
+		error(`Unsupported mapper: {config.id}`)
+	end
+	return factory(config)
+end
+
+return {
+	supports = Supports,
+	create = Create,
 }

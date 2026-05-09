@@ -11,11 +11,11 @@ local wrapBank = Base.wrapBank
 local normalizeOffset = Base.normalizeOffset
 
 --// MAPPER_000
-local function NROM(config: MapperConfig)
+const function NROM(config: MapperConfig)
 	local prg_banks_16k = atLeastOne(config.prgSize // 0x4000)
 	local prg_ram_size = config.prgRamSize
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -24,11 +24,11 @@ local function NROM(config: MapperConfig)
 		return prg_banks_16k <= 1 and bit32.band(addr - 0x8000, 0x3FFF) or bit32.band(addr - 0x8000, 0x7FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		return bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if prg_ram_size <= 0 then
 			return nil
 		end
@@ -70,7 +70,7 @@ local function NROM(config: MapperConfig)
 end
 
 --// MAPPER_001/105/155
-local function MMC1(config: MapperConfig)
+const function MMC1(config: MapperConfig)
 	local mapper_id = config.id
 	local is_mapper_105 = mapper_id == 105
 	local is_mapper_155 = mapper_id == 155
@@ -105,7 +105,7 @@ local function MMC1(config: MapperConfig)
 	local chr_base_0000 = 0
 	local chr_base_1000 = 0
 
-	local function recalc_prg_map()
+	const function recalc_prg_map()
 		local prg_mode = bit32.band(bit32.rshift(control, 2), 0x03)
 
 		if is_mapper_105 then
@@ -172,7 +172,7 @@ local function MMC1(config: MapperConfig)
 		end
 	end
 
-	local function recalc_chr_map()
+	const function recalc_chr_map()
 		local chr_mode = bit32.band(bit32.rshift(control, 4), 0x01)
 		if chr_mode == 0 then
 			chr_8k_mode = true
@@ -185,13 +185,13 @@ local function MMC1(config: MapperConfig)
 		end
 	end
 
-	local function update_control_dependent_state()
+	const function update_control_dependent_state()
 		mirroring = bit32.band(control, 0x03)
 		recalc_prg_map()
 		recalc_chr_map()
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -208,7 +208,7 @@ local function MMC1(config: MapperConfig)
 		return prg_base_c000 + bit32.band(addr, 0x3FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		if chr_8k_mode then
 			return chr_base_8k + addr
@@ -221,7 +221,7 @@ local function MMC1(config: MapperConfig)
 		return chr_base_1000 + bit32.band(addr, 0x0FFF)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -263,7 +263,7 @@ local function MMC1(config: MapperConfig)
 		shift = 0x10
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if not prg_ram_available then
 			return nil
 		end
@@ -276,7 +276,7 @@ local function MMC1(config: MapperConfig)
 		return normalizeOffset(addr - 0x6000, prg_ram_size)
 	end
 
-	local function clock_cpu(cycles: number)
+	const function clock_cpu(cycles: number)
 		if not is_mapper_105 or cycles <= 0 or not mmc1_105_irq_enabled then
 			return
 		end
@@ -292,7 +292,7 @@ local function MMC1(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		shift = 0x10
 		control = bit32.bor(0x0C, bit32.band(config.initialMirroring, 0x03))
@@ -344,14 +344,14 @@ local function MMC1(config: MapperConfig)
 end
 
 --// MAPPER_002
-local function UNROM(config: MapperConfig)
+const function UNROM(config: MapperConfig)
 	local mapper_id = config.id
 	local is_mapper_94 = mapper_id == 94
 	local is_mapper_180 = mapper_id == 180
 	local prg_banks_16k = atLeastOne(config.prgSize // 0x4000)
 	local bank_select = 0
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -372,11 +372,11 @@ local function UNROM(config: MapperConfig)
 		return (prg_banks_16k - 1) * 0x4000 + bit32.band(addr, 0x3FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		return bit32.band(addr, 0x1FFF)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -392,7 +392,7 @@ local function UNROM(config: MapperConfig)
 		bank_select = wrapBank(bank, prg_banks_16k)
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		bank_select = 0
 	end
 
@@ -418,11 +418,11 @@ local function UNROM(config: MapperConfig)
 end
 
 --// MAPPER_013
-local function CpROM(config: MapperConfig)
+const function CpROM(config: MapperConfig)
 	local chr_banks_4k = atLeastOne(config.chrSize // 0x1000)
 	local chr_bank_1000 = 0
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -431,7 +431,7 @@ local function CpROM(config: MapperConfig)
 		return bit32.band(addr - 0x8000, 0x7FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		if addr < 0x1000 then
 			return addr
@@ -440,7 +440,7 @@ local function CpROM(config: MapperConfig)
 		return chr_bank_1000 * 0x1000 + bit32.band(addr, 0x0FFF)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		if bit32.band(addr, 0xFFFF) < 0x8000 then
 			return
 		end
@@ -448,7 +448,7 @@ local function CpROM(config: MapperConfig)
 		chr_bank_1000 = wrapBank(bit32.band(value, 0x03), chr_banks_4k)
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		chr_bank_1000 = 0
 	end
 
@@ -474,12 +474,12 @@ local function CpROM(config: MapperConfig)
 end
 
 --// MAPPER_003
-local function CNROM(config: MapperConfig)
+const function CNROM(config: MapperConfig)
 	local prg_banks_16k = atLeastOne(config.prgSize // 0x4000)
 	local chr_banks_8k = atLeastOne(config.chrSize // 0x2000)
 	local chr_bank = 0
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -492,12 +492,12 @@ local function CNROM(config: MapperConfig)
 		return bit32.band(addr - 0x8000, 0x7FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		return chr_bank * 0x2000 + addr
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -506,7 +506,7 @@ local function CNROM(config: MapperConfig)
 		chr_bank = wrapBank(value, chr_banks_8k)
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		chr_bank = 0
 	end
 
@@ -532,12 +532,12 @@ local function CNROM(config: MapperConfig)
 end
 
 --// MAPPER_185
-local function CnromProtect(config: MapperConfig)
+const function CnromProtect(config: MapperConfig)
 	local prg_banks_16k = atLeastOne(config.prgSize // 0x4000)
 	local submapper = config.submapper or 0
 	local chr_enabled = true
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -550,7 +550,7 @@ local function CnromProtect(config: MapperConfig)
 		return bit32.band(addr - 0x8000, 0x7FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		if chr_enabled then
 			return bit32.band(addr, 0x1FFF)
 		end
@@ -558,7 +558,7 @@ local function CnromProtect(config: MapperConfig)
 		return -1
 	end
 
-	local function read_ppu(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number?
+	const function read_ppu(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number?
 		if not chr_enabled and addr >= 0 and addr < 0x2000 then
 			return 0x01
 		end
@@ -566,7 +566,7 @@ local function CnromProtect(config: MapperConfig)
 		return nil
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		if bit32.band(addr, 0xFFFF) < 0x8000 then
 			return
 		end
@@ -580,7 +580,7 @@ local function CnromProtect(config: MapperConfig)
 		)
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		chr_enabled = true
 	end
 
@@ -606,7 +606,7 @@ local function CnromProtect(config: MapperConfig)
 end
 
 --// MAPPER_004
-local function MMC3(config: MapperConfig)
+const function MMC3(config: MapperConfig)
 	local prg_total_8k = atLeastOne(config.prgSize // 0x2000)
 	local chr_total_1k = atLeastOne(config.chrSize // 0x0400)
 	local prg_ram_size = config.prgRamSize
@@ -670,7 +670,7 @@ local function MMC3(config: MapperConfig)
 	local prg_ram_enabled = prg_ram_available
 	local prg_ram_write_protect = true
 
-	local function set_reg(index: number, value: number)
+	const function set_reg(index: number, value: number)
 		if index == 0 then
 			reg0 = value
 		elseif index == 1 then
@@ -690,7 +690,7 @@ local function MMC3(config: MapperConfig)
 		end
 	end
 
-	local function recalc_prg_slots()
+	const function recalc_prg_slots()
 		local count = prg_total_8k
 
 		if prg_mode == 0 then
@@ -711,7 +711,7 @@ local function MMC3(config: MapperConfig)
 		prg_base3 = prg_slot3 * 0x2000
 	end
 
-	local function recalc_chr_slots()
+	const function recalc_chr_slots()
 		local r0 = bit32.band(reg0, 0xFE)
 		local r1 = bit32.band(reg1, 0xFE)
 		local r2 = reg2
@@ -750,7 +750,7 @@ local function MMC3(config: MapperConfig)
 		chr_base7 = chr_slot7 * 0x0400
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -769,7 +769,7 @@ local function MMC3(config: MapperConfig)
 		return prg_base3 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local segment = bit32.rshift(addr, 10)
 		if segment == 0 then
@@ -796,7 +796,7 @@ local function MMC3(config: MapperConfig)
 		return chr_base7 + bit32.band(addr, 0x03FF)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 
 		if addr < 0x8000 then
@@ -837,6 +837,7 @@ local function MMC3(config: MapperConfig)
 			if even then
 				irq_latch = value
 			else
+				irq_counter = 0
 				irq_reload = true
 			end
 			return
@@ -850,7 +851,7 @@ local function MMC3(config: MapperConfig)
 		end
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if prg_ram_available then
 			addr = bit32.band(addr, 0xFFFF)
 			return if addr >= 0x6000 and addr < 0x8000 then normalizeOffset(addr - 0x6000, prg_ram_size) else nil
@@ -859,7 +860,7 @@ local function MMC3(config: MapperConfig)
 		return nil
 	end
 
-	local function clock_a12(a12_high: boolean)
+	const function clock_a12(a12_high: boolean)
 		if a12_high then
 			if not a12_prev and a12_low_cycles >= 12 then
 				if irq_counter == 0 or irq_reload then
@@ -882,7 +883,7 @@ local function MMC3(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 
 		reg0 = 0
@@ -947,7 +948,7 @@ local function MMC3(config: MapperConfig)
 end
 
 --// MAPPER_004 variants
-local function MMC3_VAR(config: MapperConfig)
+const function MMC3_VAR(config: MapperConfig)
 	local mapper_id = config.id
 	local is_mapper_37 = mapper_id == 37
 	local is_mapper_47 = mapper_id == 47
@@ -1021,7 +1022,7 @@ local function MMC3_VAR(config: MapperConfig)
 	local nametable_page2 = 0
 	local nametable_page3 = 1
 
-	local function apply_variant_prg_bank(page: number): number
+	const function apply_variant_prg_bank(page: number): number
 		if is_mapper_37 then
 			if selected_block <= 2 then
 				page = bit32.band(page, 0x07)
@@ -1042,7 +1043,7 @@ local function MMC3_VAR(config: MapperConfig)
 		return wrapBank(page, prg_total_8k)
 	end
 
-	local function apply_variant_chr_bank(page: number): number
+	const function apply_variant_chr_bank(page: number): number
 		if is_mapper_37 then
 			if selected_block >= 4 then
 				page = bit32.bor(page, 0x80)
@@ -1057,7 +1058,7 @@ local function MMC3_VAR(config: MapperConfig)
 		return wrapBank(page, chr_total_1k)
 	end
 
-	local function reset_txsrom_nametables()
+	const function reset_txsrom_nametables()
 		if mirroring == 3 then
 			nametable_page0 = 0
 			nametable_page1 = 0
@@ -1081,7 +1082,7 @@ local function MMC3_VAR(config: MapperConfig)
 		end
 	end
 
-	local function update_txsrom_nametables(value: number)
+	const function update_txsrom_nametables(value: number)
 		local nametable = bit32.band(bit32.rshift(value, 7), 0x01)
 
 		if chr_mode == 0 then
@@ -1106,7 +1107,7 @@ local function MMC3_VAR(config: MapperConfig)
 		end
 	end
 
-	local function set_reg(index: number, value: number)
+	const function set_reg(index: number, value: number)
 		if index == 0 then
 			reg0 = value
 		elseif index == 1 then
@@ -1126,7 +1127,7 @@ local function MMC3_VAR(config: MapperConfig)
 		end
 	end
 
-	local function recalc_prg_slots()
+	const function recalc_prg_slots()
 		if prg_mode == 0 then
 			prg_slot0 = apply_variant_prg_bank(reg6)
 			prg_slot1 = apply_variant_prg_bank(reg7)
@@ -1145,7 +1146,7 @@ local function MMC3_VAR(config: MapperConfig)
 		prg_base3 = prg_slot3 * 0x2000
 	end
 
-	local function recalc_chr_slots()
+	const function recalc_chr_slots()
 		local r0 = bit32.band(reg0, 0xFE)
 		local r1 = bit32.band(reg1, 0xFE)
 		local r2 = reg2
@@ -1183,7 +1184,7 @@ local function MMC3_VAR(config: MapperConfig)
 		chr_base7 = chr_slot7 * 0x0400
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -1202,7 +1203,7 @@ local function MMC3_VAR(config: MapperConfig)
 		return prg_base3 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local segment = bit32.rshift(addr, 10)
 		if segment == 0 then
@@ -1229,7 +1230,7 @@ local function MMC3_VAR(config: MapperConfig)
 		return chr_base7 + bit32.band(addr, 0x03FF)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 
 		if (is_mapper_37 or is_mapper_47) and addr < 0x8000 then
@@ -1282,6 +1283,7 @@ local function MMC3_VAR(config: MapperConfig)
 			if even then
 				irq_latch = value
 			else
+				irq_counter = 0
 				irq_reload = true
 			end
 			return
@@ -1295,7 +1297,7 @@ local function MMC3_VAR(config: MapperConfig)
 		end
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if prg_ram_available then
 			addr = bit32.band(addr, 0xFFFF)
 			return if addr >= 0x6000 and addr < 0x8000 then normalizeOffset(addr - 0x6000, prg_ram_size) else nil
@@ -1304,7 +1306,7 @@ local function MMC3_VAR(config: MapperConfig)
 		return nil
 	end
 
-	local function read_nametable(addr: number): number?
+	const function read_nametable(addr: number): number?
 		if vram_buf then
 			local offset = bit32.band(addr, 0x0FFF)
 			local nt = bit32.rshift(offset, 10)
@@ -1316,7 +1318,7 @@ local function MMC3_VAR(config: MapperConfig)
 		return nil
 	end
 
-	local function write_nametable(addr: number, value: number): boolean
+	const function write_nametable(addr: number, value: number): boolean
 		if vram_buf then
 			local offset = bit32.band(addr, 0x0FFF)
 			local nt = bit32.rshift(offset, 10)
@@ -1329,7 +1331,7 @@ local function MMC3_VAR(config: MapperConfig)
 		return false
 	end
 
-	local function clock_a12(a12_high: boolean)
+	const function clock_a12(a12_high: boolean)
 		if a12_high then
 			if not a12_prev and a12_low_cycles >= 12 then
 				if irq_counter == 0 or irq_reload then
@@ -1352,7 +1354,7 @@ local function MMC3_VAR(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 
 		reg0 = 0
@@ -1421,7 +1423,7 @@ local function MMC3_VAR(config: MapperConfig)
 end
 
 --// MAPPER_005
-local function MMC5(config: MapperConfig)
+const function MMC5(config: MapperConfig)
 	local four_screen = config.fourScreen
 	local vram_buf = config.vram
 
@@ -1518,7 +1520,7 @@ local function MMC5(config: MapperConfig)
 	local mmc5_chr_set_b_base6 = 0
 	local mmc5_chr_set_b_base7 = 0
 
-	local function recalc_mmc5_prg_slots()
+	const function recalc_mmc5_prg_slots()
 		local reg0 = buffer.readu8(mmc5_prg_regs, 0)
 		local reg1 = buffer.readu8(mmc5_prg_regs, 1)
 		local reg2 = buffer.readu8(mmc5_prg_regs, 2)
@@ -1550,11 +1552,11 @@ local function MMC5(config: MapperConfig)
 		mmc5_prg_ram_base_6000 = wrapBank(mmc5_prg_ram_bank, prg_ram_total_8k) * 0x2000
 	end
 
-	local function mmc5_wrap_chr_base(bank_1k: number): number
+	const function mmc5_wrap_chr_base(bank_1k: number): number
 		return wrapBank(bank_1k, chr_total_1k) * 0x0400
 	end
 
-	local function recalc_mmc5_chr_slots()
+	const function recalc_mmc5_chr_slots()
 		local r0 = buffer.readu16(mmc5_chr_regs, 0)
 		local r1 = buffer.readu16(mmc5_chr_regs, 2)
 		local r2 = buffer.readu16(mmc5_chr_regs, 4)
@@ -1657,7 +1659,7 @@ local function MMC5(config: MapperConfig)
 		mmc5_chr_set_b_base7 = mmc5_wrap_chr_base(r11)
 	end
 
-	local function mmc5_set_chr_reg(reg_index: number, value: number)
+	const function mmc5_set_chr_reg(reg_index: number, value: number)
 		buffer.writeu16(
 			mmc5_chr_regs,
 			reg_index * 2,
@@ -1666,7 +1668,7 @@ local function MMC5(config: MapperConfig)
 		recalc_mmc5_chr_slots()
 	end
 
-	local function mmc5_prg_ram_offset(addr: number): number?
+	const function mmc5_prg_ram_offset(addr: number): number?
 		if not prg_ram_available then
 			return nil
 		end
@@ -1725,7 +1727,7 @@ local function MMC5(config: MapperConfig)
 		return if mmc5_prg_reg2_maps_ram then mmc5_prg_ram_reg2_base_8k + bit32.band(addr, 0x1FFF) else nil
 	end
 
-	local function update_mmc5_simple_mirroring()
+	const function update_mmc5_simple_mirroring()
 		if four_screen then
 			return
 		end
@@ -1744,7 +1746,7 @@ local function MMC5(config: MapperConfig)
 		end
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -1787,7 +1789,7 @@ local function MMC5(config: MapperConfig)
 		return mmc5_prg_base_slot3 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, fetch_kind: number?, sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, fetch_kind: number?, sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local kind = fetch_kind or 0
 
@@ -1881,7 +1883,7 @@ local function MMC5(config: MapperConfig)
 		return mmc5_chr_set_a_base7 + inner
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 
 		if addr >= 0x5C00 and addr <= 0x5FFF then
@@ -1986,7 +1988,7 @@ local function MMC5(config: MapperConfig)
 		end
 	end
 
-	local function read_cpu(addr: number): number?
+	const function read_cpu(addr: number): number?
 		addr = bit32.band(addr, 0xFFFF)
 
 		if addr >= 0x5C00 and addr <= 0x5FFF then
@@ -2019,7 +2021,7 @@ local function MMC5(config: MapperConfig)
 		return nil
 	end
 
-	local function read_nametable(addr: number): number?
+	const function read_nametable(addr: number): number?
 		if vram_buf == nil then
 			return nil
 		end
@@ -2111,7 +2113,7 @@ local function MMC5(config: MapperConfig)
 		return mmc5_fill_attr * 0x55
 	end
 
-	local function write_nametable(addr: number, value: number): boolean
+	const function write_nametable(addr: number, value: number): boolean
 		if vram_buf == nil then
 			return false
 		end
@@ -2133,12 +2135,12 @@ local function MMC5(config: MapperConfig)
 		return true
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		addr = bit32.band(addr, 0xFFFF)
 		return mmc5_prg_ram_offset(addr)
 	end
 
-	local function mmc5_detect_scanline_start(addr: number)
+	const function mmc5_detect_scanline_start(addr: number)
 		if mmc5_nt_read_counter >= 2 then
 			if not mmc5_in_frame and not mmc5_need_in_frame then
 				mmc5_need_in_frame = true
@@ -2161,7 +2163,7 @@ local function MMC5(config: MapperConfig)
 		end
 	end
 
-	local function clock_scanline(scanline_value: number?)
+	const function clock_scanline(scanline_value: number?)
 		if scanline_value == nil then
 			return
 		end
@@ -2186,7 +2188,7 @@ local function MMC5(config: MapperConfig)
 	local mmc5_dots_per_scanline = 341
 	local mmc5_dots_per_frame = 262 * mmc5_dots_per_scanline
 
-	local function on_ppu_address(addr: number, scanline: number, cycle: number, rendering: boolean)
+	const function on_ppu_address(addr: number, scanline: number, cycle: number, rendering: boolean)
 		if mmc5_last_ppu_read_scanline >= 0 and mmc5_last_ppu_read_cycle >= 1 then
 			local prev_dot = mmc5_last_ppu_read_scanline * mmc5_dots_per_scanline + mmc5_last_ppu_read_cycle
 			local curr_dot = scanline * mmc5_dots_per_scanline + cycle
@@ -2238,7 +2240,7 @@ local function MMC5(config: MapperConfig)
 		mmc5_last_ppu_read_addr = addr
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 
 		mmc5_prg_mode = 3
@@ -2333,13 +2335,13 @@ local function MMC5(config: MapperConfig)
 end
 
 --// MAPPER_007
-local function AOROM(config: MapperConfig)
+const function AOROM(config: MapperConfig)
 	local prg_banks_32k = atLeastOne(config.prgSize // 0x8000)
 	local four_screen = config.fourScreen
 	local bank_select = 0
 	local mirroring = if four_screen then 2 else 0
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -2348,11 +2350,11 @@ local function AOROM(config: MapperConfig)
 		return bank_select * 0x8000 + bit32.band(addr - 0x8000, 0x7FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		return bit32.band(addr, 0x1FFF)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -2365,7 +2367,7 @@ local function AOROM(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		bank_select = 0
 		mirroring = if four_screen then 2 else 0
 	end
@@ -2393,7 +2395,7 @@ local function AOROM(config: MapperConfig)
 end
 
 --// MAPPER_009
-local function MMC2(config: MapperConfig)
+const function MMC2(config: MapperConfig)
 	local prg_total_8k = atLeastOne(config.prgSize // 0x2000)
 	local chr_total_4k = atLeastOne(config.chrSize // 0x1000)
 	local mirroring = config.initialMirroring
@@ -2416,18 +2418,18 @@ local function MMC2(config: MapperConfig)
 	local latch0_fe = false
 	local latch1_fe = false
 
-	local function recalc_prg_base_8000()
+	const function recalc_prg_base_8000()
 		prg_base_8000 = wrapBank(prg_bank, prg_total_8k) * 0x2000
 	end
 
-	local function recalc_chr_bases()
+	const function recalc_chr_bases()
 		chr_fd_0_base = wrapBank(chr_fd_0, chr_total_4k) * 0x1000
 		chr_fe_0_base = wrapBank(chr_fe_0, chr_total_4k) * 0x1000
 		chr_fd_1_base = wrapBank(chr_fd_1, chr_total_4k) * 0x1000
 		chr_fe_1_base = wrapBank(chr_fe_1, chr_total_4k) * 0x1000
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -2445,7 +2447,7 @@ local function MMC2(config: MapperConfig)
 		return prg_base_E000 + bit32.band(addr, 0x1FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local mapped_base = 0
 
@@ -2471,7 +2473,7 @@ local function MMC2(config: MapperConfig)
 		return mapped
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0xA000 then
 			return
@@ -2497,7 +2499,7 @@ local function MMC2(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		prg_bank = 0
 		chr_fd_0 = 0
@@ -2535,7 +2537,7 @@ local function MMC2(config: MapperConfig)
 end
 
 --// MAPPER_010
-local function MMC4(config: MapperConfig)
+const function MMC4(config: MapperConfig)
 	local prg_total_16k = atLeastOne(config.prgSize // 0x4000)
 	local chr_total_4k = atLeastOne(config.chrSize // 0x1000)
 	local prg_ram_size = config.prgRamSize
@@ -2558,18 +2560,18 @@ local function MMC4(config: MapperConfig)
 	local latch0_fe = false
 	local latch1_fe = false
 
-	local function recalc_prg_base_8000()
+	const function recalc_prg_base_8000()
 		prg_base_8000 = wrapBank(prg_bank, prg_total_16k) * 0x4000
 	end
 
-	local function recalc_chr_bases()
+	const function recalc_chr_bases()
 		chr_fd_0_base = wrapBank(chr_fd_0, chr_total_4k) * 0x1000
 		chr_fe_0_base = wrapBank(chr_fe_0, chr_total_4k) * 0x1000
 		chr_fd_1_base = wrapBank(chr_fd_1, chr_total_4k) * 0x1000
 		chr_fe_1_base = wrapBank(chr_fe_1, chr_total_4k) * 0x1000
 	end
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -2582,7 +2584,7 @@ local function MMC4(config: MapperConfig)
 		return prg_base_C000 + bit32.band(addr, 0x3FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		local mapped_base = 0
 
@@ -2608,7 +2610,7 @@ local function MMC4(config: MapperConfig)
 		return mapped
 	end
 
-	local function map_prg_ram_addr(addr: number): number?
+	const function map_prg_ram_addr(addr: number): number?
 		if not prg_ram_available then
 			return nil
 		end
@@ -2621,7 +2623,7 @@ local function MMC4(config: MapperConfig)
 		return normalizeOffset(addr - 0x6000, prg_ram_size)
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0xA000 then
 			return
@@ -2647,7 +2649,7 @@ local function MMC4(config: MapperConfig)
 		end
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		mirroring = config.initialMirroring
 		prg_bank = 0
 		chr_fd_0 = 0
@@ -2685,14 +2687,14 @@ local function MMC4(config: MapperConfig)
 end
 
 --// MAPPER_066
-local function GXROM(config: MapperConfig)
+const function GXROM(config: MapperConfig)
 	local prg_banks_32k = atLeastOne(config.prgSize // 0x8000)
 	local chr_banks_8k = atLeastOne(config.chrSize // 0x2000)
 
 	local prg_bank = 0
 	local chr_bank = 0
 
-	local function map_prg_addr(addr: number): number
+	const function map_prg_addr(addr: number): number
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return 0
@@ -2701,12 +2703,12 @@ local function GXROM(config: MapperConfig)
 		return prg_bank * 0x8000 + bit32.band(addr - 0x8000, 0x7FFF)
 	end
 
-	local function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
+	const function map_chr_addr(addr: number, _fetch_kind: number?, _sprite_16: boolean?): number
 		addr = bit32.band(addr, 0x1FFF)
 		return chr_bank * 0x2000 + addr
 	end
 
-	local function write_cpu(addr: number, value: number)
+	const function write_cpu(addr: number, value: number)
 		addr = bit32.band(addr, 0xFFFF)
 		if addr < 0x8000 then
 			return
@@ -2716,7 +2718,7 @@ local function GXROM(config: MapperConfig)
 		chr_bank = wrapBank(bit32.band(value, 0x03), chr_banks_8k)
 	end
 
-	local function reset_mapper()
+	const function reset_mapper()
 		prg_bank = 0
 		chr_bank = 0
 	end
