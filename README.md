@@ -5,14 +5,14 @@
 [![Release](https://img.shields.io/badge/release-latest-darkblue?style=plastic)](https://github.com/vantoanvh/LuauNES/releases/latest)
 [![Devforum](https://img.shields.io/badge/devforum-videos-cyan?style=plastic)](https://devforum.roblox.com/t/fastest-nes-emulator-in-roblox/4524040?u=vantoanvh_dev)
 
-**NES** emulator ported to roblox luau inspired/based on **[Mesen2](https://github.com/SourMesen/Mesen2/tree/master)** ( one of the most accurate nes emulators )<br><br>
+**NES** emulator ported to roblox luau inspired/based on **[Mesen2](https://github.com/SourMesen/Mesen2/tree/master)**<br><br>
 This is very performant and able to run **Kirby Adventure** with ~150 FPS ( 13th Gen Intel® Core™ i7-13620H )<br>
 also **Donkey Kong Classics** with ~220 FPS.
 <br><br>
-But for low/mid-end devices, it still runs pretty smoothly. ( ~30-70 FPS )
+But for low-end devices, it still runs pretty smoothly. ( ~30-70 FPS )
 <br>
 
-Moreover, you should upload your audio files as your own ( I cannot distribute the sounds because I am unverified )<br>
+Moreover, you should upload your audio files as your own <br>
 The audio files you can download in the [Sounds](https://github.com/vantoanvh/LuauNES/tree/main/Sounds) folder<br>
 
 > <h3>Disclaimer</h3> Your device should have native code generation to make this run effectively.<br>This uses <strong>EditableImage</strong> so you need ID verification for this.
@@ -26,8 +26,9 @@ The audio files you can download in the [Sounds](https://github.com/vantoanvh/Lu
 - Almost cycle-accurate CPU
 - No DMC channels (sorry!)
 
-# Supported Mappers:
-
+<details>
+  <summary>Supported Mappers (59)</summary>
+	
 ### Nintendo
 
 - `0` - NROM
@@ -93,6 +94,7 @@ The audio files you can download in the [Sounds](https://github.com/vantoanvh/Lu
 - `79` - NINA-03 / NINA-06
 - `116` - Huang / Gouder SOMARI-P
 - `163` - Nanjing FC-001
+</details>
 
 ## Code usage
 
