@@ -1,6 +1,6 @@
 # LuauNES, The fastest NES emulator in Roblox.
 
-![Ver](https://img.shields.io/badge/version-v1.5.1-blue?style=plastic)
+![Ver](https://img.shields.io/badge/version-v1.6.0-blue?style=plastic)
 [![License](https://img.shields.io/badge/license-MIT-97ca00?style=plastic)](https://github.com/vantoanvh/LuauNES/blob/main/LICENSE)
 [![Release](https://img.shields.io/badge/release-latest-darkblue?style=plastic)](https://github.com/vantoanvh/LuauNES/releases/latest)
 [![Devforum](https://img.shields.io/badge/devforum-videos-cyan?style=plastic)](https://devforum.roblox.com/t/fastest-nes-emulator-in-roblox/4524040?u=vantoanvh_dev)
