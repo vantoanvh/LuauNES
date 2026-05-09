@@ -7,17 +7,14 @@
   <style>
     :root {
       --bg: #050505;
-      --panel: #0d0d0d;
-      --surface: #121212;
-      --surface-hover: #181818;
-      --text: #f2f2f2;
-      --muted: #8a8a8a;
-      --border: #242424;
-      --border-strong: #343434;
-      --accent: #5a5a5a;
-      --accent-hover: #6a6a6a;
-      --focus: #3a3a3a;
-      --shadow: #000000;
+      --panel: #0b0b0c;
+      --surface: #101113;
+      --surface-hover: #151619;
+      --text: #f4f4f5;
+      --muted: #8e929a;
+      --border: rgba(255, 255, 255, 0.12);
+      --border-strong: rgba(255, 255, 255, 0.2);
+      --focus: rgba(255, 255, 255, 0.12);
     }
 
     * {
@@ -31,18 +28,18 @@
       place-items: center;
       background: var(--bg);
       color: var(--text);
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      font-family: Inter, "Segoe UI", system-ui, sans-serif;
       padding: 16px;
       color-scheme: dark;
     }
 
-    .card {
-      width: min(780px, 100%);
+    .panel {
+      width: min(440px, 100%);
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 16px;
-      box-shadow: 0 18px 42px 0 var(--shadow);
+      padding: 18px;
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.34);
     }
 
     .title {
@@ -52,131 +49,467 @@
       letter-spacing: 0.2px;
     }
 
-    .subtitle {
-      margin: 4px 0 12px;
+    .status {
+      margin: 5px 0 16px;
       color: var(--muted);
       font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .row {
+    .file-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 96px;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .file-picker {
       display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
       align-items: center;
-      margin-bottom: 10px;
-    }
-
-    input[type="file"] {
-      max-width: 100%;
-      color: var(--text);
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 6px;
+      border-radius: 10px;
+      min-height: 48px;
+      padding: 7px;
       background: var(--surface);
+      cursor: pointer;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
       transition: border-color 0.15s ease, background 0.15s ease;
     }
 
-    button {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--surface);
-      color: var(--text);
-      padding: 7px 12px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
-    }
-
-    button.primary {
-      background: var(--accent);
-      border-color: var(--border-strong);
-      color: var(--text);
-    }
-
-    button:hover {
+    .file-picker:hover,
+    .file-input:focus-visible + .file-picker {
       border-color: var(--border-strong);
       background: var(--surface-hover);
     }
 
-    button.primary:hover {
-      border-color: #4a4a4a;
-      background: var(--accent-hover);
-    }
-
-    textarea {
-      width: 100%;
-      min-height: 280px;
-      resize: vertical;
+    .file-action,
+    button {
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 10px;
-      font: 13px/1.45 Consolas, "Courier New", monospace;
-      color: var(--text);
+      border-radius: 9px;
       background: var(--surface);
-      outline: none;
-      transition: border-color 0.15s ease, background 0.15s ease;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1;
     }
 
-    input[type="file"]:focus-visible,
-    button:focus-visible,
-    textarea:focus-visible {
-      border-color: var(--border-strong);
-      box-shadow: 0 0 0 3px var(--focus);
+    .file-action {
+      flex: 0 0 auto;
+      padding: 8px 11px;
+      font-weight: 600;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
     }
 
-    .hint {
-      margin-top: 8px;
-      font-size: 12px;
+    .file-details {
+      min-width: 0;
+      text-align: right;
+    }
+
+    .file-name,
+    .file-size {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-name {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.25;
+    }
+
+    .file-size {
+      margin-top: 3px;
       color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    button {
+      min-height: 48px;
+      padding: 6px 9px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    }
+
+    .button-label,
+    .button-meta {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .button-label {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.15;
+    }
+
+    .button-meta {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.1;
+    }
+
+    button.primary {
+      background: #f4f4f5;
+      border-color: #f4f4f5;
+      color: #050505;
+      box-shadow: none;
+    }
+
+    button.primary .button-meta {
+      color: #555960;
+    }
+
+    button:hover:not(:disabled) {
+      border-color: var(--border-strong);
+      background: var(--surface-hover);
+      transform: translateY(1px);
+    }
+
+    button.primary:hover:not(:disabled) {
+      background: #ffffff;
+      border-color: #ffffff;
+    }
+
+    button:disabled {
+      cursor: default;
+      opacity: 0.42;
+    }
+
+    button:focus-visible {
+      outline: none;
+      box-shadow:
+        0 0 0 3px var(--focus),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(0);
     }
   </style>
 </head>
 <body>
-  <main class="card">
+  <main class="panel">
     <h1 class="title">File to RBXMX</h1>
-    <p class="subtitle">Upload, edit source, and export.</p>
+    <p id="statusText" class="status">No file selected.</p>
 
-    <div class="row">
-      <input id="fileInput" type="file" />
-      <button id="copyBtn" type="button">Copy</button>
-      <button id="exportBtn" class="primary" type="button">Export .rbxmx</button>
+    <div class="controls">
+      <input id="fileInput" class="file-input" type="file" />
+      <label class="file-picker" for="fileInput">
+        <span class="file-action">Choose File</span>
+        <span class="file-details">
+          <span id="fileName" class="file-name">Nothing loaded</span>
+          <span id="fileSize" class="file-size">100 MB max</span>
+        </span>
+      </label>
+      <button id="exportBtn" class="primary" type="button" disabled>
+        <span class="button-label">Export</span>
+        <span id="exportMeta" class="button-meta">RBXMX</span>
+      </button>
     </div>
-
-    <textarea id="clipboardBox" spellcheck="false" placeholder="--// name.extension&#10;&#10;return &quot;\0\12\42\255\23&quot;"></textarea>
-    <p class="hint">Upload a file to generate editable text. Every byte is written as a numeric Lua escape.</p>
   </main>
 
   <script>
     const fileInput = document.getElementById("fileInput");
-    const clipboardBox = document.getElementById("clipboardBox");
-    const copyBtn = document.getElementById("copyBtn");
+    const fileName = document.getElementById("fileName");
+    const fileSize = document.getElementById("fileSize");
+    const statusText = document.getElementById("statusText");
     const exportBtn = document.getElementById("exportBtn");
+    const exportMeta = document.getElementById("exportMeta");
     const MAX_FILE_BYTES = 100 * 1024 * 1024;
+    const BYTES_PER_LINE = 32;
+    const RBXMX_HEADER = `<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">\n`;
+    const RBXMX_FOOTER = `</roblox>`;
+    const ITEM_SOURCE_PREFIX = `\t<Item class="ModuleScript">\n\t\t<Properties>\n\t\t\t<Content name="LinkedSource"><null></null></Content>\n\t\t\t<ProtectedString name="Source"><![CDATA[`;
+    const ITEM_NAME_PREFIX = `]]></ProtectedString>\n\t\t\t<string name="Name">`;
+    const ITEM_SUFFIX = `</string>\n\t\t</Properties>\n\t</Item>\n`;
+    const TEXT_ENCODER = new TextEncoder();
+    const TEXT_DECODER = new TextDecoder();
+    const BYTE_ESCAPES = Array.from({ length: 256 }, (_, value) => (
+      "\\x" + value.toString(16).padStart(2, "0").toUpperCase()
+    ));
+    let moduleEntries = [];
+    let exportFileName = "module.rbxmx";
 
-    function bytesToLuaEscapedString(bytes) {
-      let result = "";
-      for (const b of bytes) {
-        result += "\\" + String(b);
+    function setReady(ready) {
+      exportBtn.disabled = !ready;
+    }
+
+    function resetFile() {
+      moduleEntries = [];
+      exportFileName = "module.rbxmx";
+      fileName.textContent = "Nothing loaded";
+      fileName.title = "";
+      fileSize.textContent = "100 MB max";
+      statusText.textContent = "No file selected.";
+      exportMeta.textContent = "RBXMX";
+      setReady(false);
+    }
+
+    function getBaseName(name) {
+      const dotIndex = name.lastIndexOf(".");
+      return dotIndex > 0 ? name.slice(0, dotIndex) : name;
+    }
+
+    function getDownloadName(name) {
+      const safeName = (name || "module")
+        .replace(/[\\/:*?"<>|\x00-\x1F]/g, "_")
+        .replace(/[. ]+$/g, "");
+      return `${safeName || "module"}.rbxmx`;
+    }
+
+    function getLeafName(name) {
+      const normalized = name.replaceAll("\\", "/");
+      const slashIndex = normalized.lastIndexOf("/");
+      return slashIndex >= 0 ? normalized.slice(slashIndex + 1) : normalized;
+    }
+
+    function xmlEscape(text) {
+      return text
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&apos;");
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+
+      const units = ["KB", "MB", "GB"];
+      let value = bytes / 1024;
+      let unitIndex = 0;
+
+      while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex += 1;
       }
-      return result;
+
+      return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
     }
 
-    function toClipboardText(fileName, bytes) {
-      const escaped = bytesToLuaEscapedString(bytes);
-      return `--// ${fileName}\n\nreturn "${escaped}"`;
+    function getSourceSize(byteCount) {
+      if (byteCount === 0) return 9;
+
+      const lineCount = Math.ceil(byteCount / BYTES_PER_LINE);
+      return 9 + byteCount * 4 + (lineCount - 1) * 3;
     }
 
-    function cdataSafe(text) {
-      return text.replaceAll("]]>", "]]]]><![CDATA[>");
+    function getUtf8Size(text) {
+      return TEXT_ENCODER.encode(text).length;
     }
 
-    function buildRbxmx(sourceText) {
-      const safeSource = cdataSafe(sourceText);
-      return `<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">\n\t<Item class="ModuleScript">\n\t\t<Properties>\n\t\t\t<Content name="LinkedSource"><null></null></Content>\n\t\t\t<ProtectedString name="Source"><![CDATA[${safeSource}]]></ProtectedString>\n\t\t\t<string name="Name">ModuleScript</string>\n\t\t</Properties>\n\t</Item>\n</roblox>`;
+    function isZipBytes(bytes) {
+      return bytes.length >= 4
+        && bytes[0] === 0x50
+        && bytes[1] === 0x4B
+        && bytes[2] === 0x03
+        && bytes[3] === 0x04;
     }
 
-    function downloadTextFile(fileName, content) {
-      const blob = new Blob([content], { type: "application/xml;charset=utf-8" });
+    function readU16(view, offset) {
+      return view.getUint16(offset, true);
+    }
+
+    function readU32(view, offset) {
+      return view.getUint32(offset, true);
+    }
+
+    function findZipEnd(view) {
+      const minOffset = Math.max(0, view.byteLength - 65557);
+      for (let offset = view.byteLength - 22; offset >= minOffset; offset -= 1) {
+        if (readU32(view, offset) === 0x06054B50) {
+          return offset;
+        }
+      }
+      return -1;
+    }
+
+    async function inflateRaw(bytes) {
+      if (!("DecompressionStream" in window)) {
+        throw new Error("ZIP deflate is not supported in this browser.");
+      }
+
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+
+    function makeUniqueName(name, counts) {
+      const count = counts.get(name) ?? 0;
+      counts.set(name, count + 1);
+      return count === 0 ? name : `${name}_${count + 1}`;
+    }
+
+    async function extractZipEntries(bytes) {
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const endOffset = findZipEnd(view);
+      if (endOffset < 0) {
+        throw new Error("Could not find ZIP directory.");
+      }
+
+      if (readU16(view, endOffset + 4) !== 0 || readU16(view, endOffset + 6) !== 0) {
+        throw new Error("Multi-disk ZIP files are not supported.");
+      }
+
+      const entryCount = readU16(view, endOffset + 10);
+      const centralOffset = readU32(view, endOffset + 16);
+      if (entryCount === 0xFFFF || centralOffset === 0xFFFFFFFF) {
+        throw new Error("ZIP64 files are not supported.");
+      }
+
+      const entries = [];
+      const nameCounts = new Map();
+      let totalBytes = 0;
+      let cursor = centralOffset;
+
+      for (let index = 0; index < entryCount; index += 1) {
+        if (readU32(view, cursor) !== 0x02014B50) {
+          throw new Error("ZIP directory is invalid.");
+        }
+
+        const flags = readU16(view, cursor + 8);
+        const method = readU16(view, cursor + 10);
+        const compressedSize = readU32(view, cursor + 20);
+        const uncompressedSize = readU32(view, cursor + 24);
+        const nameLength = readU16(view, cursor + 28);
+        const extraLength = readU16(view, cursor + 30);
+        const commentLength = readU16(view, cursor + 32);
+        const localOffset = readU32(view, cursor + 42);
+        if (compressedSize === 0xFFFFFFFF || uncompressedSize === 0xFFFFFFFF || localOffset === 0xFFFFFFFF) {
+          throw new Error("ZIP64 files are not supported.");
+        }
+
+        const rawName = bytes.subarray(cursor + 46, cursor + 46 + nameLength);
+        const zipName = TEXT_DECODER.decode(rawName);
+        cursor += 46 + nameLength + extraLength + commentLength;
+
+        if (zipName.endsWith("/")) {
+          continue;
+        }
+        if (flags & 0x01) {
+          throw new Error("Encrypted ZIP entries are not supported.");
+        }
+        if (method !== 0 && method !== 8) {
+          throw new Error(`Unsupported ZIP compression method: ${method}.`);
+        }
+
+        totalBytes += uncompressedSize;
+        if (totalBytes > MAX_FILE_BYTES) {
+          throw new Error("Extracted ZIP content is larger than 100 MB.");
+        }
+
+        if (readU32(view, localOffset) !== 0x04034B50) {
+          throw new Error("ZIP file header is invalid.");
+        }
+
+        const localNameLength = readU16(view, localOffset + 26);
+        const localExtraLength = readU16(view, localOffset + 28);
+        const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+        const compressedBytes = bytes.subarray(dataOffset, dataOffset + compressedSize);
+        const fileBytes = method === 0 ? compressedBytes : await inflateRaw(compressedBytes);
+        if (fileBytes.length !== uncompressedSize) {
+          throw new Error("ZIP entry size does not match its directory record.");
+        }
+
+        const baseName = getBaseName(getLeafName(zipName));
+        entries.push({
+          name: makeUniqueName(baseName || "ModuleScript", nameCounts),
+          bytes: fileBytes,
+          sourceText: null,
+        });
+      }
+
+      if (entries.length === 0) {
+        throw new Error("ZIP file has no files to export.");
+      }
+
+      return entries;
+    }
+
+    function getRbxmxParts() {
+      const parts = [RBXMX_HEADER];
+
+      for (const entry of moduleEntries) {
+        parts.push(
+          ITEM_SOURCE_PREFIX,
+          getEntrySourceText(entry),
+          ITEM_NAME_PREFIX,
+          xmlEscape(entry.name),
+          ITEM_SUFFIX,
+        );
+      }
+
+      parts.push(RBXMX_FOOTER);
+      return parts;
+    }
+
+    function getRbxmxSize(entries) {
+      let size = getUtf8Size(RBXMX_HEADER) + getUtf8Size(RBXMX_FOOTER);
+
+      for (const entry of entries) {
+        size += getUtf8Size(ITEM_SOURCE_PREFIX)
+          + getSourceSize(entry.bytes.length)
+          + getUtf8Size(ITEM_NAME_PREFIX)
+          + getUtf8Size(xmlEscape(entry.name))
+          + getUtf8Size(ITEM_SUFFIX);
+      }
+
+      return size;
+    }
+
+    function bytesToSourceText(bytes) {
+      if (bytes.length === 0) return `return ""`;
+
+      const lineCount = Math.ceil(bytes.length / BYTES_PER_LINE);
+      const lines = new Array(lineCount);
+
+      for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {
+        const start = lineIndex * BYTES_PER_LINE;
+        const end = Math.min(start + BYTES_PER_LINE, bytes.length);
+        let line = lineIndex === 0 ? `return "` : "";
+
+        for (let i = start; i < end; i += 1) {
+          line += BYTE_ESCAPES[bytes[i]];
+        }
+
+        lines[lineIndex] = end < bytes.length ? line + "\\z" : line + `"`;
+      }
+
+      return lines.join("\n");
+    }
+
+    function getEntrySourceText(entry) {
+      if (entry.sourceText === null) {
+        entry.sourceText = bytesToSourceText(entry.bytes);
+      }
+
+      return entry.sourceText;
+    }
+
+    function downloadTextFile(fileName, parts) {
+      const blob = new Blob(parts, { type: "application/xml;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -191,35 +524,48 @@
       const file = event.target.files?.[0];
       if (!file) return;
       if (file.size > MAX_FILE_BYTES) {
-        alert("Max file size is 10 MB.");
+        alert("Max file size is 100 MB.");
         fileInput.value = "";
+        resetFile();
         return;
       }
 
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      clipboardBox.value = toClipboardText(file.name, bytes);
-    });
+      setReady(false);
 
-    copyBtn.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(clipboardBox.value);
-        copyBtn.textContent = "Copied";
-        setTimeout(() => {
-          copyBtn.textContent = "Copy";
-        }, 1200);
-      } catch {
-        copyBtn.textContent = "Copy failed";
-        setTimeout(() => {
-          copyBtn.textContent = "Copy";
-        }, 1200);
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        const baseName = getBaseName(file.name);
+
+        if (isZipBytes(bytes)) {
+          moduleEntries = await extractZipEntries(bytes);
+          const extractedSize = moduleEntries.reduce((total, entry) => total + entry.bytes.length, 0);
+          fileSize.textContent = `${moduleEntries.length.toLocaleString()} files`;
+          statusText.textContent = `${formatBytes(extractedSize)} extracted.`;
+        } else {
+          moduleEntries = [{
+            name: baseName || "ModuleScript",
+            bytes,
+            sourceText: null,
+          }];
+          fileSize.textContent = `${formatBytes(bytes.length)} file`;
+          statusText.textContent = `${bytes.length.toLocaleString()} bytes ready.`;
+        }
+
+        exportFileName = getDownloadName(baseName);
+        fileName.textContent = file.name;
+        fileName.title = file.name;
+        exportMeta.textContent = formatBytes(getRbxmxSize(moduleEntries));
+        setReady(true);
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "Could not read file.");
+        fileInput.value = "";
+        resetFile();
       }
     });
 
     exportBtn.addEventListener("click", () => {
-      const source = clipboardBox.value ?? "";
-      const xml = buildRbxmx(source);
-      downloadTextFile("module.rbxmx", xml);
+      downloadTextFile(exportFileName, getRbxmxParts());
     });
   </script>
 </body>
