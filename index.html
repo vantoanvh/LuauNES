@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- File to RBXMX client exporter UI and encoder. -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -21,20 +22,27 @@
       box-sizing: border-box;
     }
 
+    html {
+      min-height: 100%;
+    }
+
     body {
       margin: 0;
+      width: 100%;
       min-height: 100vh;
+      min-height: 100svh;
       display: grid;
-      place-items: center;
+      align-items: center;
+      justify-items: center;
       background: var(--bg);
       color: var(--text);
-      font-family: Inter, "Segoe UI", system-ui, sans-serif;
+      font-family: ui-sans-serif, "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
       padding: 16px;
       color-scheme: dark;
     }
 
     .panel {
-      width: min(440px, 100%);
+      width: min(560px, 100%);
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 12px;
@@ -53,9 +61,7 @@
       margin: 5px 0 16px;
       color: var(--muted);
       font-size: 12px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      line-height: 1.45;
     }
 
     .file-input {
@@ -71,6 +77,110 @@
       grid-template-columns: minmax(0, 1fr) 96px;
       gap: 12px;
       align-items: stretch;
+    }
+
+    .options {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin: 14px 0 0;
+    }
+
+    .option {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 42px;
+      gap: 12px;
+      align-items: start;
+      min-height: 86px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .option:hover,
+    .option:has(.toggle-input:focus-visible) {
+      border-color: var(--border-strong);
+      background: var(--surface-hover);
+    }
+
+    .option:has(.toggle-input:disabled) {
+      cursor: default;
+      opacity: 0.48;
+    }
+
+    .option-text {
+      min-width: 0;
+    }
+
+    .option-label,
+    .option-meta,
+    .option-description {
+      display: block;
+    }
+
+    .option-label {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.15;
+    }
+
+    .option-meta {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.15;
+    }
+
+    .option-description {
+      margin-top: 6px;
+      color: #b6bac2;
+      font-size: 11px;
+      line-height: 1.3;
+      min-height: 29px;
+    }
+
+    .toggle-input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .toggle-track {
+      position: relative;
+      margin-top: 1px;
+      width: 42px;
+      height: 24px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #070708;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .toggle-track::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+
+    .toggle-input:checked + .toggle-track {
+      border-color: #f4f4f5;
+      background: #f4f4f5;
+    }
+
+    .toggle-input:checked + .toggle-track::after {
+      background: #050505;
+      transform: translateX(18px);
     }
 
     .file-picker {
@@ -208,12 +318,26 @@
     button:active:not(:disabled) {
       transform: translateY(0);
     }
+
+    @media (max-width: 560px) {
+      .controls {
+        grid-template-columns: 1fr;
+      }
+
+      .options {
+        grid-template-columns: 1fr;
+      }
+
+      .option {
+        min-height: 82px;
+      }
+    }
   </style>
 </head>
 <body>
   <main class="panel">
     <h1 class="title">File to RBXMX</h1>
-    <p id="statusText" class="status">No file selected.</p>
+    <p id="statusText" class="status">Choose a file or ZIP. Export creates ModuleScripts that return the original bytes as a string or buffer.</p>
 
     <div class="controls">
       <input id="fileInput" class="file-input" type="file" />
@@ -221,13 +345,52 @@
         <span class="file-action">Choose File</span>
         <span class="file-details">
           <span id="fileName" class="file-name">Nothing loaded</span>
-          <span id="fileSize" class="file-size">100 MB max</span>
+          <span id="fileSize" class="file-size">1 GB max</span>
         </span>
       </label>
       <button id="exportBtn" class="primary" type="button" disabled>
         <span class="button-label">Export</span>
         <span id="exportMeta" class="button-meta">RBXMX</span>
       </button>
+    </div>
+
+    <div class="options" aria-label="Encoding options">
+      <label class="option">
+        <span class="option-text">
+          <span class="option-label">Zstd</span>
+          <span class="option-meta">Compression</span>
+          <span class="option-description">Compresses bytes to make the exported file smaller.</span>
+        </span>
+        <input id="zstdToggle" class="toggle-input" type="checkbox" />
+        <span class="toggle-track" aria-hidden="true"></span>
+      </label>
+      <label class="option">
+        <span class="option-text">
+          <span class="option-label">Base64</span>
+          <span class="option-meta">Format</span>
+          <span class="option-description">Stores bytes as clean Base64 text for smaller scripts.</span>
+        </span>
+        <input id="base64Toggle" class="toggle-input" type="checkbox" checked />
+        <span class="toggle-track" aria-hidden="true"></span>
+      </label>
+      <label class="option">
+        <span class="option-text">
+          <span class="option-label">Buffer</span>
+          <span class="option-meta">Format</span>
+          <span class="option-description">Returns a buffer directly instead of converting to string.</span>
+        </span>
+        <input id="returnBufferToggle" class="toggle-input" type="checkbox" checked />
+        <span class="toggle-track" aria-hidden="true"></span>
+      </label>
+      <label class="option">
+        <span class="option-text">
+          <span class="option-label">No split lines</span>
+          <span class="option-meta">No \z split</span>
+          <span class="option-description">Keeps one long string for faster load, but risky to open.</span>
+        </span>
+        <input id="oneLineToggle" class="toggle-input" type="checkbox" />
+        <span class="toggle-track" aria-hidden="true"></span>
+      </label>
     </div>
   </main>
 
@@ -238,32 +401,240 @@
     const statusText = document.getElementById("statusText");
     const exportBtn = document.getElementById("exportBtn");
     const exportMeta = document.getElementById("exportMeta");
-    const MAX_FILE_BYTES = 100 * 1024 * 1024;
+    const zstdToggle = document.getElementById("zstdToggle");
+    const base64Toggle = document.getElementById("base64Toggle");
+    const returnBufferToggle = document.getElementById("returnBufferToggle");
+    const oneLineToggle = document.getElementById("oneLineToggle");
+    const MAX_FILE_BYTES = 1024 * 1024 * 1024;
     const BYTES_PER_LINE = 32;
+    const BASE64_CHARS_PER_LINE = 128;
     const RBXMX_HEADER = `<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">\n`;
     const RBXMX_FOOTER = `</roblox>`;
     const ITEM_SOURCE_PREFIX = `\t<Item class="ModuleScript">\n\t\t<Properties>\n\t\t\t<Content name="LinkedSource"><null></null></Content>\n\t\t\t<ProtectedString name="Source"><![CDATA[`;
     const ITEM_NAME_PREFIX = `]]></ProtectedString>\n\t\t\t<string name="Name">`;
     const ITEM_SUFFIX = `</string>\n\t\t</Properties>\n\t</Item>\n`;
+    const ENCODING_SERVICE_SOURCE = `local EncodingService = game:GetService("EncodingService")\n`;
+    const RETURN_PREFIX = "return ";
+    const BUFFER_TOSTRING_PREFIX = "buffer.tostring(";
+    const BUFFER_FROMSTRING_PREFIX = "buffer.fromstring(";
+    const BASE64_DECODE_PREFIX = "EncodingService:Base64Decode(";
+    const ZSTD_DECODE_PREFIX = "EncodingService:DecompressBuffer(";
+    const ZSTD_DECODE_SUFFIX = ", Enum.CompressionAlgorithm.Zstd)";
+    const ZSTD_SCRIPT_SOURCE = "oneidentity-zstd.js";
+    const ZSTD_COMPRESSION_LEVEL = 19;
+    const ENCODING_WORKER_COUNT = Math.min(4, Math.max(1, ((typeof navigator === "object" ? navigator.hardwareConcurrency : 2) || 2) - 1));
+    const ZSTD_WORKER_SOURCE = [
+      "self.window = self;",
+      "let zstdSimplePromise = null;",
+      "async function getZstdSimple(codecUrl) {",
+      "  if (zstdSimplePromise === null) {",
+      "    zstdSimplePromise = (async () => {",
+      "      importScripts(codecUrl);",
+      "      if (!self.ZstdInit) throw new Error('Zstd codec did not initialize.');",
+      "      const zstd = await self.ZstdInit();",
+      "      return zstd.ZstdSimple;",
+      "    })();",
+      "  }",
+      "  return zstdSimplePromise;",
+      "}",
+      "self.onmessage = async (event) => {",
+      "  const { id, codecUrl, bytes, level } = event.data;",
+      "  try {",
+      "    const zstdSimple = await getZstdSimple(codecUrl);",
+      "    const compressed = zstdSimple.compress(new Uint8Array(bytes), level);",
+      "    if (!(compressed instanceof Uint8Array)) throw new Error('Zstd compression failed.');",
+      "    const output = compressed.slice();",
+      "    self.postMessage({ id, bytes: output }, [output.buffer]);",
+      "  } catch (error) {",
+      "    self.postMessage({ id, error: error instanceof Error ? error.message : String(error) });",
+      "  }",
+      "};",
+    ].join("\n");
+    const BASE64_WORKER_SOURCE = [
+      "const CODES = new TextEncoder().encode('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/');",
+      "function encode(bytes) {",
+      "  const output = new Uint8Array(Math.ceil(bytes.length / 3) * 4);",
+      "  let inputIndex = 0;",
+      "  let outputIndex = 0;",
+      "  while (inputIndex + 2 < bytes.length) {",
+      "    const value = (bytes[inputIndex] << 16) | (bytes[inputIndex + 1] << 8) | bytes[inputIndex + 2];",
+      "    output[outputIndex] = CODES[(value >> 18) & 0x3F];",
+      "    output[outputIndex + 1] = CODES[(value >> 12) & 0x3F];",
+      "    output[outputIndex + 2] = CODES[(value >> 6) & 0x3F];",
+      "    output[outputIndex + 3] = CODES[value & 0x3F];",
+      "    inputIndex += 3;",
+      "    outputIndex += 4;",
+      "  }",
+      "  if (inputIndex < bytes.length) {",
+      "    const remaining = bytes.length - inputIndex;",
+      "    const value = (bytes[inputIndex] << 16) | (remaining === 2 ? bytes[inputIndex + 1] << 8 : 0);",
+      "    output[outputIndex] = CODES[(value >> 18) & 0x3F];",
+      "    output[outputIndex + 1] = CODES[(value >> 12) & 0x3F];",
+      "    output[outputIndex + 2] = remaining === 2 ? CODES[(value >> 6) & 0x3F] : 0x3D;",
+      "    output[outputIndex + 3] = 0x3D;",
+      "  }",
+      "  return output;",
+      "}",
+      "self.onmessage = (event) => {",
+      "  const { id, bytes } = event.data;",
+      "  try {",
+      "    const output = encode(new Uint8Array(bytes));",
+      "    self.postMessage({ id, bytes: output }, [output.buffer]);",
+      "  } catch (error) {",
+      "    self.postMessage({ id, error: error instanceof Error ? error.message : String(error) });",
+      "  }",
+      "};",
+    ].join("\n");
+    const LITERAL_WORKER_SOURCE = [
+      "const BYTE_ESCAPES = Array.from({ length: 256 }, (_, value) => '\\\\x' + value.toString(16).padStart(2, '0').toUpperCase());",
+      "function asciiToLiteral(bytes, oneLine, charsPerLine) {",
+      "  if (bytes.length === 0) return '\"\"';",
+      "  const width = oneLine ? bytes.length : charsPerLine;",
+      "  const lineCount = Math.ceil(bytes.length / width);",
+      "  const lines = new Array(lineCount);",
+      "  for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {",
+      "    const start = lineIndex * width;",
+      "    const end = Math.min(start + width, bytes.length);",
+      "    let line = lineIndex === 0 ? '\"' : '';",
+      "    for (let i = start; i < end; i += 8192) {",
+      "      line += String.fromCharCode(...bytes.subarray(i, Math.min(i + 8192, end)));",
+      "    }",
+      "    lines[lineIndex] = end < bytes.length ? line + '\\\\z' : line + '\"';",
+      "  }",
+      "  return lines.join('\\n');",
+      "}",
+      "function bytesToLiteral(bytes, oneLine, bytesPerLine) {",
+      "  if (bytes.length === 0) return '\"\"';",
+      "  const width = oneLine ? bytes.length : bytesPerLine;",
+      "  const lineCount = Math.ceil(bytes.length / width);",
+      "  const lines = new Array(lineCount);",
+      "  for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {",
+      "    const start = lineIndex * width;",
+      "    const end = Math.min(start + width, bytes.length);",
+      "    let line = lineIndex === 0 ? '\"' : '';",
+      "    for (let i = start; i < end; i += 1) {",
+      "      line += BYTE_ESCAPES[bytes[i]];",
+      "    }",
+      "    lines[lineIndex] = end < bytes.length ? line + '\\\\z' : line + '\"';",
+      "  }",
+      "  return lines.join('\\n');",
+      "}",
+      "self.onmessage = (event) => {",
+      "  const { id, bytes, ascii, oneLine, bytesPerLine, charsPerLine } = event.data;",
+      "  try {",
+      "    const input = new Uint8Array(bytes);",
+      "    const text = ascii ? asciiToLiteral(input, oneLine, charsPerLine) : bytesToLiteral(input, oneLine, bytesPerLine);",
+      "    self.postMessage({ id, text });",
+      "  } catch (error) {",
+      "    self.postMessage({ id, error: error instanceof Error ? error.message : String(error) });",
+      "  }",
+      "};",
+    ].join("\n");
     const TEXT_ENCODER = new TextEncoder();
     const TEXT_DECODER = new TextDecoder();
+    const BASE64_CODES = TEXT_ENCODER.encode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/");
+    const EMPTY_ZSTD_FRAME = new Uint8Array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00]);
     const BYTE_ESCAPES = Array.from({ length: 256 }, (_, value) => (
       "\\x" + value.toString(16).padStart(2, "0").toUpperCase()
     ));
     let moduleEntries = [];
     let exportFileName = "module.rbxmx";
+    let zstdSimplePromise = null;
+    let zstdScriptPromise = null;
+    let zstdWorkers = [];
+    let zstdWorkerCursor = 0;
+    let zstdWorkerRequestId = 0;
+    let zstdWorkerUnavailable = false;
+    const zstdWorkerRequests = new Map();
+    let base64Workers = [];
+    let base64WorkerCursor = 0;
+    let base64WorkerRequestId = 0;
+    let base64WorkerUnavailable = false;
+    const base64WorkerRequests = new Map();
+    let literalWorkers = [];
+    let literalWorkerCursor = 0;
+    let literalWorkerRequestId = 0;
+    let literalWorkerUnavailable = false;
+    const literalWorkerRequests = new Map();
+    let isBusy = false;
+    let isPreparingExport = false;
+    let exportMetaRequest = 0;
+    let compressionProgress = null;
 
     function setReady(ready) {
-      exportBtn.disabled = !ready;
+      exportBtn.disabled = !ready || isBusy || isPreparingExport;
+    }
+
+    function syncOptionAvailability() {
+      const disabled = isBusy || isPreparingExport;
+      fileInput.disabled = disabled;
+      zstdToggle.disabled = disabled;
+      base64Toggle.disabled = disabled;
+      returnBufferToggle.disabled = disabled;
+      oneLineToggle.disabled = disabled;
+    }
+
+    function setBusy(busy) {
+      isBusy = busy;
+      syncOptionAvailability();
+      setReady(moduleEntries.length > 0);
+    }
+
+    function setPreparingExport(preparing) {
+      isPreparingExport = preparing;
+      syncOptionAvailability();
+      setReady(moduleEntries.length > 0);
+    }
+
+    function getPendingZstdCompressionCount() {
+      if (!zstdToggle.checked) {
+        return 0;
+      }
+
+      return moduleEntries.reduce((count, entry) => count + (entry.zstdBytes === null ? 1 : 0), 0);
+    }
+
+    function beginCompressionProgress(total, restoreText) {
+      if (total <= 0) {
+        compressionProgress = null;
+        return;
+      }
+
+      compressionProgress = { done: 0, total, restoreText };
+      statusText.textContent = `Compressing 0/${total}`;
+    }
+
+    function completeCompressionProgressItem() {
+      if (compressionProgress === null) {
+        return;
+      }
+
+      compressionProgress.done += 1;
+      statusText.textContent = `Compressing ${compressionProgress.done}/${compressionProgress.total}`;
+    }
+
+    function endCompressionProgress(restore) {
+      if (compressionProgress === null) {
+        return;
+      }
+
+      const restoreText = compressionProgress.restoreText;
+      compressionProgress = null;
+      if (restore) {
+        statusText.textContent = restoreText;
+      }
     }
 
     function resetFile() {
+      exportMetaRequest += 1;
+      setPreparingExport(false);
+      endCompressionProgress(false);
       moduleEntries = [];
       exportFileName = "module.rbxmx";
       fileName.textContent = "Nothing loaded";
       fileName.title = "";
-      fileSize.textContent = "100 MB max";
-      statusText.textContent = "No file selected.";
+      fileSize.textContent = "1 GB max";
+      statusText.textContent = "Choose a file or ZIP. Export creates ModuleScripts that return the original bytes as a string or buffer.";
       exportMeta.textContent = "RBXMX";
       setReady(false);
     }
@@ -295,6 +666,10 @@
         .replaceAll("'", "&apos;");
     }
 
+    function cdataEscape(text) {
+      return text.replaceAll("]]>", "]]]]><![CDATA[>");
+    }
+
     function formatBytes(bytes) {
       if (bytes < 1024) return `${bytes} B`;
 
@@ -313,8 +688,22 @@
     function getSourceSize(byteCount) {
       if (byteCount === 0) return 9;
 
-      const lineCount = Math.ceil(byteCount / BYTES_PER_LINE);
-      return 9 + byteCount * 4 + (lineCount - 1) * 3;
+      const lineBreakSize = oneLineToggle.checked ? 0 : (Math.ceil(byteCount / BYTES_PER_LINE) - 1) * 3;
+      return 9 + byteCount * 4 + lineBreakSize;
+    }
+
+    function getLiteralSize(byteCount) {
+      if (byteCount === 0) return 2;
+
+      const lineBreakSize = oneLineToggle.checked ? 0 : (Math.ceil(byteCount / BYTES_PER_LINE) - 1) * 3;
+      return 2 + byteCount * 4 + lineBreakSize;
+    }
+
+    function getAsciiLiteralSize(byteCount) {
+      if (byteCount === 0) return 2;
+
+      const lineBreakSize = oneLineToggle.checked ? 0 : (Math.ceil(byteCount / BASE64_CHARS_PER_LINE) - 1) * 3;
+      return 2 + byteCount + lineBreakSize;
     }
 
     function getUtf8Size(text) {
@@ -417,7 +806,7 @@
 
         totalBytes += uncompressedSize;
         if (totalBytes > MAX_FILE_BYTES) {
-          throw new Error("Extracted ZIP content is larger than 100 MB.");
+          throw new Error("Extracted ZIP content is larger than 1 GB.");
         }
 
         if (readU32(view, localOffset) !== 0x04034B50) {
@@ -437,7 +826,12 @@
         entries.push({
           name: makeUniqueName(baseName || "ModuleScript", nameCounts),
           bytes: fileBytes,
+          zstdBytes: null,
+          zstdPromise: null,
+          encodedBytes: null,
+          encodedKey: "",
           sourceText: null,
+          sourceKey: "",
         });
       }
 
@@ -448,13 +842,15 @@
       return entries;
     }
 
-    function getRbxmxParts() {
+    async function getRbxmxParts() {
       const parts = [RBXMX_HEADER];
+      const sourceTexts = await Promise.all(moduleEntries.map((entry) => getEntrySourceText(entry)));
 
-      for (const entry of moduleEntries) {
+      for (let index = 0; index < moduleEntries.length; index += 1) {
+        const entry = moduleEntries[index];
         parts.push(
           ITEM_SOURCE_PREFIX,
-          getEntrySourceText(entry),
+          cdataEscape(sourceTexts[index]),
           ITEM_NAME_PREFIX,
           xmlEscape(entry.name),
           ITEM_SUFFIX,
@@ -465,12 +861,73 @@
       return parts;
     }
 
+    function getTransformKey() {
+      return `${getEncodingKey()}${oneLineToggle.checked ? "1" : "-"}${returnBufferToggle.checked ? "r" : "-"}`;
+    }
+
+    function getEncodingKey() {
+      return `${zstdToggle.checked ? "z" : "-"}${base64Toggle.checked ? "b" : "-"}`;
+    }
+
+    function getEntryPayloadBytes(entry) {
+      const encodingKey = getEncodingKey();
+      if (!zstdToggle.checked && !base64Toggle.checked) {
+        return entry.bytes;
+      }
+
+      return entry.encodedKey === encodingKey ? entry.encodedBytes : null;
+    }
+
+    function getEntrySourceSize(entry) {
+      const payloadBytes = getEntryPayloadBytes(entry);
+      if (payloadBytes === null) {
+        return null;
+      }
+
+      if (!zstdToggle.checked && !base64Toggle.checked) {
+        let size = getUtf8Size(RETURN_PREFIX) + getLiteralSize(payloadBytes.length);
+        if (returnBufferToggle.checked) {
+          size += getUtf8Size(BUFFER_FROMSTRING_PREFIX) + 1;
+        }
+        return size;
+      }
+
+      const payloadLiteralSize = base64Toggle.checked
+        ? getAsciiLiteralSize(payloadBytes.length)
+        : getLiteralSize(payloadBytes.length);
+
+      let size = getUtf8Size(ENCODING_SERVICE_SOURCE)
+        + getUtf8Size(RETURN_PREFIX)
+        + getUtf8Size(BUFFER_FROMSTRING_PREFIX)
+        + payloadLiteralSize
+        + 1;
+
+      if (base64Toggle.checked) {
+        size += getUtf8Size(BASE64_DECODE_PREFIX) + 1;
+      }
+
+      if (zstdToggle.checked) {
+        size += getUtf8Size(ZSTD_DECODE_PREFIX) + getUtf8Size(ZSTD_DECODE_SUFFIX);
+      }
+
+      if (!returnBufferToggle.checked) {
+        size += getUtf8Size(BUFFER_TOSTRING_PREFIX) + 1;
+      }
+
+      return size;
+    }
+
     function getRbxmxSize(entries) {
       let size = getUtf8Size(RBXMX_HEADER) + getUtf8Size(RBXMX_FOOTER);
 
       for (const entry of entries) {
+        const entrySourceSize = getEntrySourceSize(entry);
+        if (entrySourceSize === null) {
+          return null;
+        }
+
         size += getUtf8Size(ITEM_SOURCE_PREFIX)
-          + getSourceSize(entry.bytes.length)
+          + entrySourceSize
           + getUtf8Size(ITEM_NAME_PREFIX)
           + getUtf8Size(xmlEscape(entry.name))
           + getUtf8Size(ITEM_SUFFIX);
@@ -479,16 +936,17 @@
       return size;
     }
 
-    function bytesToSourceText(bytes) {
-      if (bytes.length === 0) return `return ""`;
+    function bytesToLiteralText(bytes) {
+      if (bytes.length === 0) return `""`;
 
-      const lineCount = Math.ceil(bytes.length / BYTES_PER_LINE);
+      const bytesPerLine = oneLineToggle.checked ? bytes.length : BYTES_PER_LINE;
+      const lineCount = Math.ceil(bytes.length / bytesPerLine);
       const lines = new Array(lineCount);
 
       for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {
-        const start = lineIndex * BYTES_PER_LINE;
-        const end = Math.min(start + BYTES_PER_LINE, bytes.length);
-        let line = lineIndex === 0 ? `return "` : "";
+        const start = lineIndex * bytesPerLine;
+        const end = Math.min(start + bytesPerLine, bytes.length);
+        let line = lineIndex === 0 ? `"` : "";
 
         for (let i = start; i < end; i += 1) {
           line += BYTE_ESCAPES[bytes[i]];
@@ -500,12 +958,596 @@
       return lines.join("\n");
     }
 
-    function getEntrySourceText(entry) {
-      if (entry.sourceText === null) {
-        entry.sourceText = bytesToSourceText(entry.bytes);
+    function asciiBytesToLiteralText(bytes) {
+      if (bytes.length === 0) return `""`;
+
+      const charsPerLine = oneLineToggle.checked ? bytes.length : BASE64_CHARS_PER_LINE;
+      const lineCount = Math.ceil(bytes.length / charsPerLine);
+      const lines = new Array(lineCount);
+
+      for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {
+        const start = lineIndex * charsPerLine;
+        const end = Math.min(start + charsPerLine, bytes.length);
+        let line = lineIndex === 0 ? `"` : "";
+
+        for (let i = start; i < end; i += 1) {
+          line += String.fromCharCode(bytes[i]);
+        }
+
+        lines[lineIndex] = end < bytes.length ? line + "\\z" : line + `"`;
+      }
+
+      return lines.join("\n");
+    }
+
+    function base64EncodeBytes(bytes) {
+      const output = new Uint8Array(Math.ceil(bytes.length / 3) * 4);
+      let inputIndex = 0;
+      let outputIndex = 0;
+
+      while (inputIndex + 2 < bytes.length) {
+        const value = (bytes[inputIndex] << 16)
+          | (bytes[inputIndex + 1] << 8)
+          | bytes[inputIndex + 2];
+        output[outputIndex] = BASE64_CODES[value >> 18 & 0x3F];
+        output[outputIndex + 1] = BASE64_CODES[value >> 12 & 0x3F];
+        output[outputIndex + 2] = BASE64_CODES[value >> 6 & 0x3F];
+        output[outputIndex + 3] = BASE64_CODES[value & 0x3F];
+        inputIndex += 3;
+        outputIndex += 4;
+      }
+
+      if (inputIndex < bytes.length) {
+        const remaining = bytes.length - inputIndex;
+        const value = bytes[inputIndex] << 16
+          | (remaining === 2 ? bytes[inputIndex + 1] << 8 : 0);
+        output[outputIndex] = BASE64_CODES[value >> 18 & 0x3F];
+        output[outputIndex + 1] = BASE64_CODES[value >> 12 & 0x3F];
+        output[outputIndex + 2] = remaining === 2 ? BASE64_CODES[value >> 6 & 0x3F] : 0x3D;
+        output[outputIndex + 3] = 0x3D;
+      }
+
+      return output;
+    }
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = src;
+        script.async = true;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Could not load ${src}.`));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function getZstdSimple() {
+      if (zstdSimplePromise === null) {
+        zstdSimplePromise = (async () => {
+          if (!window.ZstdInit) {
+            if (zstdScriptPromise === null) {
+              zstdScriptPromise = loadScript(ZSTD_SCRIPT_SOURCE);
+            }
+            await zstdScriptPromise;
+          }
+
+          if (!window.ZstdInit) {
+            throw new Error("Zstd codec did not initialize.");
+          }
+
+          const zstd = await window.ZstdInit();
+          return zstd.ZstdSimple;
+        })();
+      }
+
+      return zstdSimplePromise;
+    }
+
+    function rejectZstdWorkerRequests(error) {
+      for (const request of zstdWorkerRequests.values()) {
+        request.reject(error);
+      }
+
+      zstdWorkerRequests.clear();
+    }
+
+    function closeZstdWorker() {
+      for (const item of zstdWorkers) {
+        item.worker.terminate();
+        URL.revokeObjectURL(item.url);
+      }
+
+      zstdWorkers = [];
+      zstdWorkerCursor = 0;
+    }
+
+    function getZstdWorker() {
+      if (zstdWorkerUnavailable) {
+        return null;
+      }
+
+      if (zstdWorkers.length > 0) {
+        const item = zstdWorkers[zstdWorkerCursor % zstdWorkers.length];
+        zstdWorkerCursor += 1;
+        return item.worker;
+      }
+
+      try {
+        for (let i = 0; i < ENCODING_WORKER_COUNT; i += 1) {
+          const url = URL.createObjectURL(new Blob([ZSTD_WORKER_SOURCE], { type: "text/javascript" }));
+          const worker = new Worker(url);
+          zstdWorkers.push({ worker, url });
+        }
+      } catch (error) {
+        zstdWorkerUnavailable = true;
+        closeZstdWorker();
+        return null;
+      }
+
+      for (const item of zstdWorkers) {
+        item.worker.onmessage = (event) => {
+          const { id, bytes, error } = event.data;
+          const request = zstdWorkerRequests.get(id);
+          if (!request) return;
+
+          zstdWorkerRequests.delete(id);
+          if (error) {
+            request.reject(new Error(error));
+            return;
+          }
+
+          request.resolve(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+        };
+
+        item.worker.onerror = (event) => {
+          zstdWorkerUnavailable = true;
+          const error = new Error(event.message || "Zstd worker failed.");
+          rejectZstdWorkerRequests(error);
+          closeZstdWorker();
+        };
+      }
+
+      return getZstdWorker();
+    }
+
+    function zstdCompressBytesInWorker(bytes) {
+      const worker = getZstdWorker();
+      if (worker === null) {
+        return Promise.reject(new Error("Zstd worker unavailable."));
+      }
+
+      const id = ++zstdWorkerRequestId;
+      const input = bytes.slice();
+      const codecUrl = new URL(ZSTD_SCRIPT_SOURCE, location.href).href;
+
+      return new Promise((resolve, reject) => {
+        zstdWorkerRequests.set(id, { resolve, reject });
+
+        try {
+          worker.postMessage({
+            id,
+            codecUrl,
+            bytes: input.buffer,
+            level: ZSTD_COMPRESSION_LEVEL,
+          }, [input.buffer]);
+        } catch (error) {
+          zstdWorkerRequests.delete(id);
+          reject(error);
+        }
+      });
+    }
+
+    async function zstdCompressBytesOnMain(bytes) {
+      const zstdSimple = await getZstdSimple();
+      const compressed = zstdSimple.compress(bytes, ZSTD_COMPRESSION_LEVEL);
+      if (!(compressed instanceof Uint8Array)) {
+        throw new Error("Zstd compression failed.");
+      }
+
+      return compressed;
+    }
+
+    async function zstdCompressBytes(bytes) {
+      if (bytes.length === 0) {
+        return EMPTY_ZSTD_FRAME;
+      }
+
+      if (!zstdWorkerUnavailable) {
+        try {
+          return await zstdCompressBytesInWorker(bytes);
+        } catch (error) {
+          zstdWorkerUnavailable = true;
+          rejectZstdWorkerRequests(error);
+          closeZstdWorker();
+        }
+      }
+
+      return zstdCompressBytesOnMain(bytes);
+    }
+
+    function rejectBase64WorkerRequests(error) {
+      for (const request of base64WorkerRequests.values()) {
+        request.reject(error);
+      }
+
+      base64WorkerRequests.clear();
+    }
+
+    function closeBase64Workers() {
+      for (const item of base64Workers) {
+        item.worker.terminate();
+        URL.revokeObjectURL(item.url);
+      }
+
+      base64Workers = [];
+      base64WorkerCursor = 0;
+    }
+
+    function getBase64Worker() {
+      if (base64WorkerUnavailable) {
+        return null;
+      }
+
+      if (base64Workers.length > 0) {
+        const item = base64Workers[base64WorkerCursor % base64Workers.length];
+        base64WorkerCursor += 1;
+        return item.worker;
+      }
+
+      try {
+        for (let i = 0; i < ENCODING_WORKER_COUNT; i += 1) {
+          const url = URL.createObjectURL(new Blob([BASE64_WORKER_SOURCE], { type: "text/javascript" }));
+          const worker = new Worker(url);
+          base64Workers.push({ worker, url });
+        }
+      } catch (error) {
+        base64WorkerUnavailable = true;
+        closeBase64Workers();
+        return null;
+      }
+
+      for (const item of base64Workers) {
+        item.worker.onmessage = (event) => {
+          const { id, bytes, error } = event.data;
+          const request = base64WorkerRequests.get(id);
+          if (!request) return;
+
+          base64WorkerRequests.delete(id);
+          if (error) {
+            request.reject(new Error(error));
+            return;
+          }
+
+          request.resolve(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+        };
+
+        item.worker.onerror = (event) => {
+          base64WorkerUnavailable = true;
+          const error = new Error(event.message || "Base64 worker failed.");
+          rejectBase64WorkerRequests(error);
+          closeBase64Workers();
+        };
+      }
+
+      return getBase64Worker();
+    }
+
+    function base64EncodeBytesInWorker(bytes) {
+      const worker = getBase64Worker();
+      if (worker === null) {
+        return Promise.reject(new Error("Base64 worker unavailable."));
+      }
+
+      const id = ++base64WorkerRequestId;
+      const input = bytes.slice();
+
+      return new Promise((resolve, reject) => {
+        base64WorkerRequests.set(id, { resolve, reject });
+
+        try {
+          worker.postMessage({ id, bytes: input.buffer }, [input.buffer]);
+        } catch (error) {
+          base64WorkerRequests.delete(id);
+          reject(error);
+        }
+      });
+    }
+
+    async function encodeBase64Bytes(bytes) {
+      if (!base64WorkerUnavailable) {
+        try {
+          return await base64EncodeBytesInWorker(bytes);
+        } catch (error) {
+          base64WorkerUnavailable = true;
+          rejectBase64WorkerRequests(error);
+          closeBase64Workers();
+        }
+      }
+
+      return base64EncodeBytes(bytes);
+    }
+
+    function rejectLiteralWorkerRequests(error) {
+      for (const request of literalWorkerRequests.values()) {
+        request.reject(error);
+      }
+
+      literalWorkerRequests.clear();
+    }
+
+    function closeLiteralWorkers() {
+      for (const item of literalWorkers) {
+        item.worker.terminate();
+        URL.revokeObjectURL(item.url);
+      }
+
+      literalWorkers = [];
+      literalWorkerCursor = 0;
+    }
+
+    function getLiteralWorker() {
+      if (literalWorkerUnavailable) {
+        return null;
+      }
+
+      if (literalWorkers.length > 0) {
+        const item = literalWorkers[literalWorkerCursor % literalWorkers.length];
+        literalWorkerCursor += 1;
+        return item.worker;
+      }
+
+      try {
+        for (let i = 0; i < ENCODING_WORKER_COUNT; i += 1) {
+          const url = URL.createObjectURL(new Blob([LITERAL_WORKER_SOURCE], { type: "text/javascript" }));
+          const worker = new Worker(url);
+          literalWorkers.push({ worker, url });
+        }
+      } catch (error) {
+        literalWorkerUnavailable = true;
+        closeLiteralWorkers();
+        return null;
+      }
+
+      for (const item of literalWorkers) {
+        item.worker.onmessage = (event) => {
+          const { id, text, error } = event.data;
+          const request = literalWorkerRequests.get(id);
+          if (!request) return;
+
+          literalWorkerRequests.delete(id);
+          if (error) {
+            request.reject(new Error(error));
+            return;
+          }
+
+          request.resolve(text);
+        };
+
+        item.worker.onerror = (event) => {
+          literalWorkerUnavailable = true;
+          const error = new Error(event.message || "Literal worker failed.");
+          rejectLiteralWorkerRequests(error);
+          closeLiteralWorkers();
+        };
+      }
+
+      return getLiteralWorker();
+    }
+
+    function literalTextInWorker(bytes, ascii) {
+      const worker = getLiteralWorker();
+      if (worker === null) {
+        return Promise.reject(new Error("Literal worker unavailable."));
+      }
+
+      const id = ++literalWorkerRequestId;
+      const input = bytes.slice();
+
+      return new Promise((resolve, reject) => {
+        literalWorkerRequests.set(id, { resolve, reject });
+
+        try {
+          worker.postMessage({
+            id,
+            bytes: input.buffer,
+            ascii,
+            oneLine: oneLineToggle.checked,
+            bytesPerLine: BYTES_PER_LINE,
+            charsPerLine: BASE64_CHARS_PER_LINE,
+          }, [input.buffer]);
+        } catch (error) {
+          literalWorkerRequests.delete(id);
+          reject(error);
+        }
+      });
+    }
+
+    async function getLiteralText(bytes, ascii) {
+      if (!literalWorkerUnavailable) {
+        try {
+          return await literalTextInWorker(bytes, ascii);
+        } catch (error) {
+          literalWorkerUnavailable = true;
+          rejectLiteralWorkerRequests(error);
+          closeLiteralWorkers();
+        }
+      }
+
+      return ascii ? asciiBytesToLiteralText(bytes) : bytesToLiteralText(bytes);
+    }
+
+    async function getEntryZstdBytes(entry) {
+      if (entry.zstdBytes === null) {
+        if (entry.zstdPromise === null) {
+          entry.zstdPromise = zstdCompressBytes(entry.bytes).then((bytes) => {
+            entry.zstdBytes = bytes;
+            entry.zstdPromise = null;
+            completeCompressionProgressItem();
+            return bytes;
+          }, (error) => {
+            entry.zstdPromise = null;
+            throw error;
+          });
+        }
+
+        return entry.zstdPromise;
+      }
+
+      return entry.zstdBytes;
+    }
+
+    async function getEntryEncodedBytes(entry) {
+      const encodingKey = getEncodingKey();
+      if (!zstdToggle.checked && !base64Toggle.checked) {
+        return entry.bytes;
+      }
+
+      if (entry.encodedKey === encodingKey && entry.encodedBytes !== null) {
+        return entry.encodedBytes;
+      }
+
+      let payloadBytes = entry.bytes;
+      if (zstdToggle.checked) {
+        payloadBytes = await getEntryZstdBytes(entry);
+      }
+
+      if (base64Toggle.checked) {
+        payloadBytes = await encodeBase64Bytes(payloadBytes);
+      }
+
+      entry.encodedBytes = payloadBytes;
+      entry.encodedKey = encodingKey;
+      return payloadBytes;
+    }
+
+    async function bytesToSourceText(payloadBytes) {
+      const payloadLiteralText = await getLiteralText(payloadBytes, base64Toggle.checked);
+
+      if (!zstdToggle.checked && !base64Toggle.checked) {
+        const expression = returnBufferToggle.checked
+          ? BUFFER_FROMSTRING_PREFIX + payloadLiteralText + ")"
+          : payloadLiteralText;
+        return RETURN_PREFIX + expression;
+      }
+
+      let expression = BUFFER_FROMSTRING_PREFIX + payloadLiteralText + ")";
+
+      if (base64Toggle.checked) {
+        expression = BASE64_DECODE_PREFIX + expression + ")";
+      }
+
+      if (zstdToggle.checked) {
+        expression = ZSTD_DECODE_PREFIX + expression + ZSTD_DECODE_SUFFIX;
+      }
+
+      if (!returnBufferToggle.checked) {
+        expression = BUFFER_TOSTRING_PREFIX + expression + ")";
+      }
+
+      return ENCODING_SERVICE_SOURCE + RETURN_PREFIX + expression;
+    }
+
+    async function getEntrySourceText(entry) {
+      const sourceKey = getTransformKey();
+      if (entry.sourceText === null || entry.sourceKey !== sourceKey) {
+        entry.sourceText = await bytesToSourceText(await getEntryEncodedBytes(entry));
+        entry.sourceKey = sourceKey;
       }
 
       return entry.sourceText;
+    }
+
+    function refreshExportMeta() {
+      if (moduleEntries.length === 0) {
+        exportMeta.textContent = "RBXMX";
+        return;
+      }
+
+      const rbxmxSize = getRbxmxSize(moduleEntries);
+      exportMeta.textContent = rbxmxSize === null ? "Encode" : formatBytes(rbxmxSize);
+    }
+
+    function clearEncodedCaches(refresh = true) {
+      for (const entry of moduleEntries) {
+        entry.encodedBytes = null;
+        entry.encodedKey = "";
+        entry.sourceText = null;
+        entry.sourceKey = "";
+      }
+
+      if (refresh) {
+        refreshExportMeta();
+      }
+    }
+
+    function clearSourceCaches(refresh = true) {
+      for (const entry of moduleEntries) {
+        entry.sourceText = null;
+        entry.sourceKey = "";
+      }
+
+      if (refresh) {
+        refreshExportMeta();
+      }
+    }
+
+    function hasMissingEncodedPayloads() {
+      if (!zstdToggle.checked && !base64Toggle.checked) {
+        return false;
+      }
+
+      const encodingKey = getEncodingKey();
+      return moduleEntries.some((entry) => (
+        entry.encodedBytes === null || entry.encodedKey !== encodingKey
+      ));
+    }
+
+    function waitForPaint() {
+      return new Promise((resolve) => {
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(resolve);
+          return;
+        }
+
+        setTimeout(resolve, 0);
+      });
+    }
+
+    async function refreshExportMetaRealtime() {
+      const request = ++exportMetaRequest;
+      if (moduleEntries.length === 0 || !hasMissingEncodedPayloads()) {
+        setPreparingExport(false);
+        endCompressionProgress(false);
+        refreshExportMeta();
+        return;
+      }
+
+      const previousStatus = statusText.textContent;
+      const pendingCompressionCount = getPendingZstdCompressionCount();
+      setPreparingExport(true);
+      exportMeta.textContent = "Sizing";
+      beginCompressionProgress(pendingCompressionCount, previousStatus);
+      await waitForPaint();
+
+      try {
+        await Promise.all(moduleEntries.map(async (entry) => {
+          if (request !== exportMetaRequest) return null;
+          return getEntryEncodedBytes(entry);
+        }));
+
+        if (request === exportMetaRequest) {
+          refreshExportMeta();
+        }
+      } catch (error) {
+        if (request === exportMetaRequest) {
+          exportMeta.textContent = "Encode";
+        }
+      } finally {
+        if (request === exportMetaRequest) {
+          endCompressionProgress(true);
+          setPreparingExport(false);
+        }
+      }
     }
 
     function downloadTextFile(fileName, parts) {
@@ -524,7 +1566,7 @@
       const file = event.target.files?.[0];
       if (!file) return;
       if (file.size > MAX_FILE_BYTES) {
-        alert("Max file size is 100 MB.");
+        alert("Max file size is 1 GB.");
         fileInput.value = "";
         resetFile();
         return;
@@ -546,7 +1588,12 @@
           moduleEntries = [{
             name: baseName || "ModuleScript",
             bytes,
+            zstdBytes: null,
+            zstdPromise: null,
+            encodedBytes: null,
+            encodedKey: "",
             sourceText: null,
+            sourceKey: "",
           }];
           fileSize.textContent = `${formatBytes(bytes.length)} file`;
           statusText.textContent = `${bytes.length.toLocaleString()} bytes ready.`;
@@ -555,8 +1602,8 @@
         exportFileName = getDownloadName(baseName);
         fileName.textContent = file.name;
         fileName.title = file.name;
-        exportMeta.textContent = formatBytes(getRbxmxSize(moduleEntries));
         setReady(true);
+        refreshExportMetaRealtime();
       } catch (error) {
         alert(error instanceof Error ? error.message : "Could not read file.");
         fileInput.value = "";
@@ -564,9 +1611,45 @@
       }
     });
 
-    exportBtn.addEventListener("click", () => {
-      downloadTextFile(exportFileName, getRbxmxParts());
+    exportBtn.addEventListener("click", async () => {
+      const previousStatus = statusText.textContent;
+      setBusy(true);
+      statusText.textContent = "Encoding payload...";
+      beginCompressionProgress(getPendingZstdCompressionCount(), "Encoding payload...");
+      await waitForPaint();
+
+      try {
+        const parts = await getRbxmxParts();
+        refreshExportMeta();
+        downloadTextFile(exportFileName, parts);
+        statusText.textContent = `Exported ${exportMeta.textContent}.`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error || "Could not export file.");
+        alert(message);
+        statusText.textContent = previousStatus;
+      } finally {
+        endCompressionProgress(false);
+        setBusy(false);
+      }
     });
+
+    zstdToggle.addEventListener("change", () => {
+      clearEncodedCaches(false);
+      refreshExportMetaRealtime();
+    });
+    base64Toggle.addEventListener("change", () => {
+      clearEncodedCaches(false);
+      refreshExportMetaRealtime();
+    });
+    returnBufferToggle.addEventListener("change", () => {
+      clearSourceCaches(false);
+      refreshExportMetaRealtime();
+    });
+    oneLineToggle.addEventListener("change", () => {
+      clearSourceCaches(false);
+      refreshExportMetaRealtime();
+    });
+    syncOptionAvailability();
   </script>
 </body>
 </html>
